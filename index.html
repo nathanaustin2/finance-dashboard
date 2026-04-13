@@ -917,11 +917,12 @@
               <option value="savings_roth_ally">Roth IRA — Ally (monthly)</option>
               <option value="savings_hsa">HSA personal (monthly)</option>
               <option value="expenses">Expenses (monthly)</option>
-              <option value="savings_balance">Savings account balance</option>
-              <option value="efund_balance">Emergency fund balance</option>
+              <option value="savings_balance">Savings — deposit / withdrawal</option>
+              <option value="efund_balance">Emergency Fund — deposit / withdrawal</option>
+              <option value="carfund_balance">Car Fund — deposit / withdrawal</option>
             </select>
           </div>
-          <!-- Hidden type field — always 'set' -->
+          <!-- Hidden type field — set for IS items, delta for balance items -->
           <input type="hidden" id="fce-type" value="set">
           <div class="form-group">
             <label id="fce-amount-label">New amount ($)</label>
@@ -3017,9 +3018,9 @@ function buildGoalForecastSeries() {
         case 'savings_roth_nate': proj.rothNate    = ev.amount; break;
         case 'savings_roth_ally': proj.rothAlly    = ev.amount; break;
         case 'savings_hsa':       proj.hsa         = ev.amount; break;
-        case 'savings_balance':   proj.savingsSet  = ev.amount; break;
-        case 'efund_balance':     proj.efundSet    = ev.amount; break;
-        case 'carfund_balance':   proj.carfundSet  = ev.amount; break;
+        case 'savings_balance':   proj.savingsDelta = (proj.savingsDelta || 0) + ev.amount; break;
+        case 'efund_balance':     proj.efundDelta   = (proj.efundDelta   || 0) + ev.amount; break;
+        case 'carfund_balance':   proj.carfundDelta = (proj.carfundDelta || 0) + ev.amount; break;
       }
     }
 
@@ -4076,40 +4077,36 @@ function getCurrentEventValue(cat) {
   }
 }
 
+const BALANCE_CATEGORIES = new Set(['savings_balance','efund_balance','carfund_balance']);
+
 function updateEventFields() {
   const cat = document.getElementById('fce-category').value;
   const lbl = document.getElementById('fce-amount-label');
   const hint = document.getElementById('fce-amount-hint');
   const endGroup = document.getElementById('fce-end-month-group');
-  const isBalance = cat === 'savings_balance' || cat === 'efund_balance';
-  const descriptions = {
-    income:            'Annual gross income during this period. e.g. $95,000',
-    taxes:             'Monthly tax total. e.g. $1,092',
-    tithing:           'Monthly tithing. e.g. $749',
-    savings_401k:      'Monthly 401(k) contribution.',
-    savings_roth:      'Monthly Roth IRA contribution (both).',
-    savings_roth_nate: "Monthly Roth IRA contribution (Nate's).",
-    savings_roth_ally: "Monthly Roth IRA contribution (Ally's).",
-    savings_hsa:       'Monthly HSA contribution.',
-    expenses:          'Total monthly expenses during this period. e.g. $3,000',
-    savings_balance:   'Set the savings account to this balance at this month.',
-    efund_balance:     'Set the emergency fund to this balance at this month.',
-  };
+  const isBalance = BALANCE_CATEGORIES.has(cat);
   const labels = {
-    income: 'Annual income ($)', savings_balance: 'New balance ($)', efund_balance: 'New balance ($)',
+    income: 'Annual income ($)',
+    savings_balance:  'Amount ($)',
+    efund_balance:    'Amount ($)',
+    carfund_balance:  'Amount ($)',
   };
   if (lbl) lbl.textContent = labels[cat] || 'New amount ($)';
   const current = getCurrentEventValue(cat);
-  if (hint) hint.innerHTML = current
-    ? `<span style="font-weight:600;color:var(--text2);">Currently: ${current}</span>`
-    : '';
+  let hintText = '';
+  if (isBalance) {
+    hintText = 'Enter positive to deposit, negative to withdraw. e.g. −30000 for car purchase.';
+  } else if (current) {
+    hintText = `<span style="font-weight:600;color:var(--text2);">Currently: ${current}</span>`;
+  }
+  if (hint) hint.innerHTML = hintText;
   if (endGroup) endGroup.style.display = isBalance ? 'none' : '';
 }
 function saveEvent() {
   const startMonth = document.getElementById('fce-month').value;
   const endMonth   = document.getElementById('fce-end-month').value;
   const category   = document.getElementById('fce-category').value;
-  const type       = 'set';
+  const type       = BALANCE_CATEGORIES.has(category) ? 'add' : 'set';
   const amount     = parseFloat(document.getElementById('fce-amount').value);
   const note       = document.getElementById('fce-note').value.trim();
   if (isNaN(amount)) { alert('Please enter a valid amount.'); return; }
@@ -4315,8 +4312,8 @@ function getFcDefaults() {
 function applyEvents(monthKey, proj) {
   const events = fcEvents.filter(e => e.month === monthKey);
   for (const ev of events) {
-    // Always treat as 'set' — the add/subtract option was removed from the UI
     switch (ev.category) {
+      // IS-line items — always set to the specified value
       case 'income':            proj.grossIncome = ev.amount; break;
       case 'taxes':             proj.taxes       = ev.amount; break;
       case 'tithing':           proj.tithing     = ev.amount; break;
@@ -4326,9 +4323,10 @@ function applyEvents(monthKey, proj) {
       case 'savings_roth_ally': proj.rothAlly    = ev.amount; break;
       case 'savings_hsa':       proj.hsa         = ev.amount; break;
       case 'expenses':          proj.expenses    = ev.amount; break;
-      case 'savings_balance':   proj.savingsSet  = ev.amount; break;
-      case 'efund_balance':     proj.efundSet    = ev.amount; break;
-      case 'carfund_balance':   proj.carfundSet  = ev.amount; break;
+      // Balance items — always apply as delta (positive = deposit, negative = withdrawal)
+      case 'savings_balance':  proj.savingsDelta = (proj.savingsDelta || 0) + ev.amount; break;
+      case 'efund_balance':    proj.efundDelta   = (proj.efundDelta   || 0) + ev.amount; break;
+      case 'carfund_balance':  proj.carfundDelta = (proj.carfundDelta || 0) + ev.amount; break;
     }
   }
 }
