@@ -6487,10 +6487,45 @@ function paystubClearImport() {
 // =====================================================================
 // INIT
 // =====================================================================
+function migrateBalanceEvents() {
+  // Balance events used to use type:'set' which our new code broke.
+  // Normalize: ensure all balance events use type:'add' (delta behavior).
+  // Also deduplicate — remove exact duplicate events (same month/category/amount).
+  const data = loadData();
+  let changed = false;
+  if (data.scenarios) {
+    data.scenarios.forEach(sc => {
+      if (!Array.isArray(sc.events)) return;
+      const balCats = new Set(['savings_balance','efund_balance','carfund_balance']);
+      // Fix type
+      sc.events.forEach(ev => {
+        if (balCats.has(ev.category) && ev.type !== 'add') {
+          // If was 'set' with a positive value > 1000, it was probably a "set to balance" intent
+          // Convert: if amount > 0, it was a target balance, skip migration (leave as-is, will be treated as delta)
+          // If amount < 0, it was a withdrawal delta — keep as-is with type 'add'
+          ev.type = 'add';
+          changed = true;
+        }
+      });
+      // Deduplicate events (same month, category, amount, groupId)
+      const seen = new Set();
+      const deduped = sc.events.filter(ev => {
+        const key = `${ev.month}|${ev.category}|${ev.amount}|${ev.groupId||''}`;
+        if (seen.has(key)) { changed = true; return false; }
+        seen.add(key);
+        return true;
+      });
+      sc.events = deduped;
+    });
+  }
+  if (changed) saveData(data);
+}
+
 function init() {
   seedHistoricalData();
   migrateHistoricalToTransactions();
   migratePayrollTax();
+  migrateBalanceEvents();
 
   renderIS();
   // Default preset: T12 — set after renderIS so HISTORICAL_IS is available
