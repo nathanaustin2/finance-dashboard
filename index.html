@@ -3663,12 +3663,6 @@ function initScenarios() {
   const data = loadData();
   if (data.scenarios && data.scenarios.length > 0) {
     scenarios = data.scenarios;
-    // One-time migration: rename "New Job + Baby" → "Scenario B"
-    let migrated = false;
-    scenarios.forEach(s => {
-      if (s.name === 'New Job + Baby') { s.name = 'Scenario B'; migrated = true; }
-    });
-    if (migrated) saveScenarios();
     activeScenarioId = data.activeScenarioId || scenarios[0].id;
   } else {
     // Create two default scenarios — Scenario B is active by default
@@ -3803,9 +3797,14 @@ function addScenario() {
   captureCurrentInputs();
   const activeSc = scenarios.find(s => s.id === activeScenarioId);
   const newId = 'sc_' + Date.now();
-  const n = scenarios.length + 1;
   const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-  const name = `Scenario ${letters[n-1] || n}`;
+  // Find the next letter not already used by an auto-named scenario
+  const usedNames = new Set(scenarios.map(s => s.name));
+  let name = 'Scenario';
+  for (const letter of letters) {
+    const candidate = `Scenario ${letter}`;
+    if (!usedNames.has(candidate)) { name = candidate; break; }
+  }
   scenarios.push({
     id: newId,
     name,
