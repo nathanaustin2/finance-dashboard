@@ -1131,7 +1131,7 @@
           </div>
           <div class="form-group">
             <label>Cash Return % /yr <span style="font-size:9px;color:var(--text3);font-weight:400;">(E-Fund, Savings)</span></label>
-            <input type="number" id="proj-cash-return" value="3.3" step="0.1" min="0" max="20" oninput="renderProjection();">
+            <input type="number" id="proj-cash-return" value="2.0" step="0.1" min="0" max="20" oninput="renderProjection();">
           </div>
         </div>
         <div style="font-size:11px;color:var(--text3);margin-top:8px;">Used by the Forecast tab and Balance Sheet goal projections.</div>
@@ -1383,7 +1383,7 @@
     </div>
     <div style="margin-top:12px;display:flex;gap:8px;">
       <button class="btn btn-primary" onclick="saveTxData()">💾 Save All</button>
-      <button class="btn btn-secondary" onclick="importCurrentMonthDefaults()">⚡ Auto-fill Recurring Items</button>
+      <button class="btn btn-secondary" onclick="openRecurringPanel()">📋 Add Recurring Items</button>
       <button class="btn btn-danger" onclick="openClearModal()">🗑 Clear Transactions</button>
     </div>
     </div><!-- /entry-transactions-inner -->
@@ -4281,7 +4281,7 @@ function seedForecastDefaults() {
       ['HSA match /mo',       fmt(p.mHSA)],
       ['Total Expenses /mo',  fmt(totalExpMo)],
       ['Investment Return',   (parseFloat(document.getElementById('proj-return')?.value) || 8) + '%'],
-      ['Cash Return',         (parseFloat(document.getElementById('proj-cash-return')?.value) || 3.3) + '%'],
+      ['Cash Return',         (parseFloat(document.getElementById('proj-cash-return')?.value) || 2.0) + '%'],
     ];
     roEl.innerHTML = rows.map(([label, val]) => `
       <div style="display:flex;justify-content:space-between;align-items:baseline;padding:4px 0;border-bottom:0.5px solid var(--border);">
@@ -4302,7 +4302,7 @@ function getFcDefaults() {
     hsaMo:          parseFloat(document.getElementById('fca-hsa').value)       || 266.66,
     matchHsaMo:     parseFloat(document.getElementById('fca-matchhsa').value)  || 100,
     expensesMo:     parseFloat(document.getElementById('fca-expenses').value)  || 3000,
-    cashRatePct:    parseFloat(document.getElementById('proj-cash-return')?.value) || 3.3,
+    cashRatePct:    parseFloat(document.getElementById('proj-cash-return')?.value) || 2.0,
     investRatePct:  parseFloat(document.getElementById('proj-return')?.value)      || 8,
   };
 }
@@ -5400,82 +5400,193 @@ function clearBalanceInputs() {
   updateEntryMonthGrid();
 }
 
-function importCurrentMonthDefaults() {
-  if (!currentEntryKey) return;
+// =====================================================================
+// RECURRING TEMPLATES PANEL
+// =====================================================================
+const DEFAULT_RECURRING_TEMPLATES = [
+  { id: 'rent',   label: 'Rent',                    amount: '1350.00', type: 'Expense', category: 'Housing',    subcategory: 'Rent',     notes: '' },
+  { id: 'dental', label: 'Health Insurance (Dental)', amount: '16.60',  type: 'Expense', category: 'Healthcare', subcategory: 'Premiums', notes: 'Health insurance' },
+];
+
+function getRecurringTemplates() {
   const data = loadData();
-  const defaults = [
-    // Nate — 2 semi-monthly paychecks ($2,145.83 each = $51,500/yr ÷ 24)
-    { type: 'Income',  category: 'Wage Income',          subcategory: '',            amount: '2145.83', notes: 'Nate 1st' },
-    { type: 'Taxes',   category: 'Federal Income Tax',   subcategory: '',            amount: '',        notes: 'Nate 1st' },
-    { type: 'Taxes',   category: 'State Income Tax',     subcategory: '',            amount: '',        notes: 'Nate 1st' },
-    { type: 'Taxes',   category: 'Social Security',      subcategory: '',            amount: '',        notes: 'Nate 1st' },
-    { type: 'Taxes',   category: 'Medicare',             subcategory: '',            amount: '',        notes: 'Nate 1st' },
-    { type: 'Tithing', category: 'Tithing',              subcategory: '',            amount: '',        notes: 'Nate 1st' },
-    { type: 'Savings', category: 'Personal Contribution',subcategory: '401k',        amount: '107.29',  notes: 'Elevate 401k' },
-    { type: 'Savings', category: 'Matching',             subcategory: '401k',        amount: '85.83',   notes: 'Elevate 401k' },
-    { type: 'Savings', category: 'Personal Contribution',subcategory: 'ROTH IRA',    amount: '312.50',  notes: 'Nate' },
-    { type: 'Savings', category: 'Personal Contribution',subcategory: 'HSA',         amount: '133.33',  notes: 'Lively' },
-    { type: 'Savings', category: 'Matching',             subcategory: 'HSA',         amount: '50.00',   notes: 'Employer' },
-    { type: 'Income',  category: 'Wage Income',          subcategory: '',            amount: '2145.83', notes: 'Nate 2nd' },
-    { type: 'Taxes',   category: 'Federal Income Tax',   subcategory: '',            amount: '',        notes: 'Nate 2nd' },
-    { type: 'Taxes',   category: 'State Income Tax',     subcategory: '',            amount: '',        notes: 'Nate 2nd' },
-    { type: 'Taxes',   category: 'Social Security',      subcategory: '',            amount: '',        notes: 'Nate 2nd' },
-    { type: 'Taxes',   category: 'Medicare',             subcategory: '',            amount: '',        notes: 'Nate 2nd' },
-    { type: 'Tithing', category: 'Tithing',              subcategory: '',            amount: '',        notes: 'Nate 2nd' },
-    { type: 'Savings', category: 'Personal Contribution',subcategory: '401k',        amount: '107.29',  notes: 'Elevate 401k' },
-    { type: 'Savings', category: 'Matching',             subcategory: '401k',        amount: '85.83',   notes: 'Elevate 401k' },
-    { type: 'Savings', category: 'Personal Contribution',subcategory: 'ROTH IRA',    amount: '312.50',  notes: 'Nate' },
-    { type: 'Savings', category: 'Personal Contribution',subcategory: 'HSA',         amount: '133.33',  notes: 'Lively' },
-    { type: 'Savings', category: 'Matching',             subcategory: 'HSA',         amount: '50.00',   notes: 'Employer' },
-    // Ally — bi-weekly (~$20/hr × hrs), enter actuals
-    { type: 'Income',  category: 'Wage Income',          subcategory: '',            amount: '',        notes: 'Ally 1st' },
-    { type: 'Taxes',   category: 'Federal Income Tax',   subcategory: '',            amount: '',        notes: 'Ally 1st' },
-    { type: 'Taxes',   category: 'State Income Tax',     subcategory: '',            amount: '',        notes: 'Ally 1st' },
-    { type: 'Taxes',   category: 'Social Security',      subcategory: '',            amount: '',        notes: 'Ally 1st' },
-    { type: 'Taxes',   category: 'Medicare',             subcategory: '',            amount: '',        notes: 'Ally 1st' },
-    { type: 'Tithing', category: 'Tithing',              subcategory: '',            amount: '',        notes: 'Ally 1st' },
-    { type: 'Savings', category: 'Personal Contribution',subcategory: 'ROTH IRA',    amount: '312.50',  notes: 'Ally' },
-    { type: 'Income',  category: 'Wage Income',          subcategory: '',            amount: '',        notes: 'Ally 2nd' },
-    { type: 'Taxes',   category: 'Federal Income Tax',   subcategory: '',            amount: '',        notes: 'Ally 2nd' },
-    { type: 'Taxes',   category: 'State Income Tax',     subcategory: '',            amount: '',        notes: 'Ally 2nd' },
-    { type: 'Taxes',   category: 'Social Security',      subcategory: '',            amount: '',        notes: 'Ally 2nd' },
-    { type: 'Taxes',   category: 'Medicare',             subcategory: '',            amount: '',        notes: 'Ally 2nd' },
-    { type: 'Tithing', category: 'Tithing',              subcategory: '',            amount: '',        notes: 'Ally 2nd' },
-    { type: 'Savings', category: 'Personal Contribution',subcategory: 'ROTH IRA',    amount: '312.50',  notes: 'Ally' },
-    // Fixed expenses
-    { type: 'Expense', category: 'Housing',      subcategory: 'Rent',        amount: '1350',  notes: '' },
-    { type: 'Expense', category: 'Healthcare',   subcategory: 'Premiums',    amount: '16.60', notes: 'Health insurance' },
-    { type: 'Expense', category: 'Transportation',       subcategory: 'Gas',         amount: '',        notes: '' },
-    { type: 'Expense', category: 'Transportation',       subcategory: 'Maintenance/Other', amount: '',  notes: '' },
-    { type: 'Expense', category: 'Food',                 subcategory: 'Groceries',   amount: '',        notes: '' },
-    { type: 'Expense', category: 'Food',                 subcategory: 'Restaurants', amount: '',        notes: '' },
-    { type: 'Expense', category: 'Personal',             subcategory: 'Personal Items', amount: '',     notes: '' },
-    { type: 'Expense', category: 'Personal',             subcategory: 'Entertainment',  amount: '',     notes: '' },
-    { type: 'Expense', category: 'Personal',             subcategory: 'Travel',         amount: '',     notes: '' },
-    { type: 'Expense', category: 'Personal',             subcategory: 'Subscriptions',  amount: '',     notes: '' },
-    { type: 'Expense', category: 'Miscellaneous',        subcategory: 'Miscellaneous',  amount: '',     notes: '' },
-  ];
-  // Merge: add only default rows whose exact signature doesn't already exist.
-  // Signature = type + category + subcategory + notes (covers paystub-imported rows).
+  if (!data.recurringTemplates) {
+    data.recurringTemplates = DEFAULT_RECURRING_TEMPLATES.map(t => ({ ...t }));
+    saveData(data);
+  }
+  return data.recurringTemplates;
+}
+
+function saveRecurringTemplates(templates) {
+  const data = loadData();
+  data.recurringTemplates = templates;
+  saveData(data);
+}
+
+let _recurringEditMode = false;
+
+function openRecurringPanel() {
+  if (!currentEntryKey) return;
+  _recurringEditMode = false;
+  renderRecurringPanel();
+  document.getElementById('recurring-panel-overlay').style.display = 'block';
+}
+
+function renderRecurringPanel() {
+  const templates = getRecurringTemplates();
+  const data = loadData();
   const existing = data.transactions[currentEntryKey] || [];
+  const existingSigs = new Set(existing.map(tx =>
+    `${tx.type}|${tx.category}|${tx.subcategory}`.toLowerCase()
+  ));
 
-  const sig = (tx) => `${tx.type}|${tx.category}|${tx.subcategory}|${tx.notes}`.toLowerCase();
-  const existingSigs = new Set(existing.map(sig));
+  const list = document.getElementById('recurring-checklist');
+  const footer = document.getElementById('recurring-panel-footer');
+  const editBtn = document.getElementById('recurring-edit-btn');
+  if (editBtn) editBtn.textContent = _recurringEditMode ? 'Done' : 'Edit List';
 
-  // Also exclude expense placeholders if real expenses already exist
-  const hasExpenses = existing.some(tx => tx.type === 'Expense' && tx.amount !== '' && tx.amount != null);
+  if (_recurringEditMode) {
+    list.innerHTML = templates.map((t, i) => {
+      const typeOpts = ['Expense','Income','Savings','Taxes','Tithing'].map(ty =>
+        `<option${ty===t.type?' selected':''}>${ty}</option>`).join('');
+      const catOpts = (TX_CATEGORIES[t.type]||[]).map(c =>
+        `<option${c===t.category?' selected':''}>${c}</option>`).join('');
+      const subOpts = (TX_SUBCATEGORIES[t.category]||[]).map(s =>
+        `<option${s===t.subcategory?' selected':''}>${s}</option>`).join('');
+      return `
+      <div style="display:flex;align-items:flex-start;gap:8px;padding:10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);">
+        <div style="flex:1;display:flex;flex-direction:column;gap:6px;">
+          <input value="${t.label}" placeholder="Label" onchange="updateRecurringField(${i},'label',this.value)"
+            style="border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:12px;font-family:var(--font-body);color:var(--text);background:var(--surface2);width:100%;">
+          <div style="display:flex;gap:6px;align-items:center;">
+            <span style="font-size:11px;color:var(--text3);flex-shrink:0;">$</span>
+            <input type="number" value="${t.amount}" placeholder="Amount" onchange="updateRecurringField(${i},'amount',this.value)"
+              style="border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:12px;font-family:var(--font-body);color:var(--text);background:var(--surface2);width:100%;">
+          </div>
+          <div style="display:flex;gap:6px;">
+            <select onchange="updateRecurringType(${i},this.value)" style="flex:1;border:1px solid var(--border);border-radius:4px;padding:4px 6px;font-size:11px;font-family:var(--font-body);color:var(--text);background:var(--surface2);">${typeOpts}</select>
+            <select onchange="updateRecurringCat(${i},this.value)" style="flex:1;border:1px solid var(--border);border-radius:4px;padding:4px 6px;font-size:11px;font-family:var(--font-body);color:var(--text);background:var(--surface2);">${catOpts}</select>
+            ${subOpts ? `<select onchange="updateRecurringField(${i},'subcategory',this.value)" style="flex:1;border:1px solid var(--border);border-radius:4px;padding:4px 6px;font-size:11px;font-family:var(--font-body);color:var(--text);background:var(--surface2);">${subOpts}</select>` : ''}
+          </div>
+        </div>
+        <button onclick="deleteRecurringTemplate(${i})" title="Remove" style="flex-shrink:0;width:26px;height:26px;border-radius:50%;background:none;border:1px solid var(--border);cursor:pointer;font-size:13px;color:var(--text3);margin-top:2px;">✕</button>
+      </div>`;
+    }).join('');
 
-  const toAdd = defaults.filter(tx => {
-    // Skip expense placeholders (empty amount) if real expenses already imported via CSV
-    if (hasExpenses && tx.type === 'Expense' && (!tx.amount || tx.amount === '')) return false;
-    return !existingSigs.has(sig(tx));
+    if (footer) footer.innerHTML = `
+      <button class="btn btn-secondary" style="width:100%;" onclick="addRecurringTemplate()">+ Add Item</button>`;
+  } else {
+    list.innerHTML = templates.map(t => {
+      const alreadyPresent = existingSigs.has(`${t.type}|${t.category}|${t.subcategory}`.toLowerCase());
+      const fmtAmt = t.amount ? `$${parseFloat(t.amount).toLocaleString('en-US', {minimumFractionDigits:2})}` : '';
+      return `<label style="display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;cursor:${alreadyPresent?'default':'pointer'};background:${alreadyPresent?'var(--surface2)':'var(--surface)'};opacity:${alreadyPresent?'0.5':'1'};">
+        <input type="checkbox" value="${t.id}" ${alreadyPresent?'disabled':'checked'} style="accent-color:var(--accent);width:15px;height:15px;flex-shrink:0;">
+        <span style="flex:1;">
+          <span style="font-size:13px;font-weight:600;color:var(--text);">${t.label}</span>
+          ${fmtAmt ? `<span style="font-size:12px;color:var(--text3);margin-left:6px;">${fmtAmt}/mo</span>` : ''}
+          ${alreadyPresent ? `<span style="font-size:11px;color:var(--text3);margin-left:6px;">· already added</span>` : ''}
+        </span>
+      </label>`;
+    }).join('');
+
+    if (footer) footer.innerHTML = `
+      <button class="btn btn-primary" style="flex:1;" onclick="insertRecurringItems()">Add Selected</button>
+      <button class="btn btn-secondary" onclick="closeRecurringPanel()">Cancel</button>`;
+  }
+}
+
+function updateRecurringField(i, field, value) {
+  const templates = getRecurringTemplates();
+  if (templates[i]) { templates[i][field] = value; saveRecurringTemplates(templates); }
+}
+
+function updateRecurringType(i, value) {
+  const templates = getRecurringTemplates();
+  if (!templates[i]) return;
+  templates[i].type = value;
+  // Reset category and subcategory to first valid options for this type
+  const cats = TX_CATEGORIES[value] || [];
+  templates[i].category = cats[0] || '';
+  const subs = TX_SUBCATEGORIES[templates[i].category] || [];
+  templates[i].subcategory = subs[0] || '';
+  saveRecurringTemplates(templates);
+  renderRecurringPanel();
+}
+
+function updateRecurringCat(i, value) {
+  const templates = getRecurringTemplates();
+  if (!templates[i]) return;
+  templates[i].category = value;
+  const subs = TX_SUBCATEGORIES[value] || [];
+  templates[i].subcategory = subs[0] || '';
+  saveRecurringTemplates(templates);
+  renderRecurringPanel();
+}
+
+function deleteRecurringTemplate(i) {
+  const templates = getRecurringTemplates();
+  templates.splice(i, 1);
+  saveRecurringTemplates(templates);
+  renderRecurringPanel();
+}
+
+function addRecurringTemplate() {
+  const templates = getRecurringTemplates();
+  templates.push({ id: 'custom_' + Date.now(), label: '', amount: '', type: 'Expense', category: 'Housing', subcategory: 'Rent', notes: '' });
+  saveRecurringTemplates(templates);
+  renderRecurringPanel();
+}
+
+function toggleRecurringEditMode() {
+  _recurringEditMode = !_recurringEditMode;
+  renderRecurringPanel();
+}
+
+function closeRecurringPanel() {
+  _recurringEditMode = false;
+  document.getElementById('recurring-panel-overlay').style.display = 'none';
+}
+
+function insertRecurringItems() {
+  if (!currentEntryKey) return;
+  const templates = getRecurringTemplates();
+  const data = loadData();
+  if (!data.transactions[currentEntryKey]) data.transactions[currentEntryKey] = [];
+  const existing = data.transactions[currentEntryKey];
+  const existingSigs = new Set(existing.map(tx =>
+    `${tx.type}|${tx.category}|${tx.subcategory}`.toLowerCase()
+  ));
+
+  const checked = [...document.querySelectorAll('#recurring-checklist input:checked')].map(el => el.value);
+  let added = 0;
+  checked.forEach(id => {
+    const t = templates.find(r => r.id === id);
+    if (!t) return;
+    const sig = `${t.type}|${t.category}|${t.subcategory}`.toLowerCase();
+    if (existingSigs.has(sig)) return;
+    data.transactions[currentEntryKey].push({
+      type: t.type, category: t.category, subcategory: t.subcategory,
+      amount: t.amount, notes: t.notes, date: `${currentEntryKey}-01`,
+    });
+    added++;
   });
 
-  data.transactions[currentEntryKey] = [...existing, ...toAdd];
-  saveData(data);
-  loadEntryData(currentEntryKey);
-  updateEntryMonthGrid();
+  if (added > 0) {
+    saveData(data);
+    loadEntryData(currentEntryKey);
+    updateEntryProgress();
+  }
+  closeRecurringPanel();
+
+  if (added > 0) {
+    const banner = document.createElement('div');
+    banner.style.cssText = 'position:fixed;bottom:24px;right:24px;background:var(--accent);color:white;padding:12px 20px;border-radius:8px;font-size:13px;font-weight:600;box-shadow:0 4px 16px rgba(0,0,0,0.15);z-index:9999;';
+    banner.textContent = `✓ ${added} recurring item${added > 1 ? 's' : ''} added`;
+    document.body.appendChild(banner);
+    setTimeout(() => banner.remove(), 3000);
+  }
 }
+
 
 function saveMonthNote() {
   if (!currentEntryKey) return;
@@ -6383,6 +6494,10 @@ function buildPaystubRows(fields) {
   add('Taxes',   'Social Security',      '',        fields.ss,        fields.label);
   add('Taxes',   'Medicare',             '',        fields.medicare,  fields.label);
   add('Taxes',   'State Income Tax',     '',        fields.stateTax,  fields.label);
+  // Auto-generate tithing at 10% of gross
+  if (fields.gross !== null && fields.gross > 0) {
+    add('Tithing', 'Tithing', '', parseFloat((fields.gross * 0.10).toFixed(2)), fields.label);
+  }
   add('Savings', 'Personal Contribution','401k',    fields.roth401k,  'Elevate 401k');
   // 401k employer match: use stub value if present, otherwise default to 4% of gross
   const match401kAmt = (fields.match401k !== null && fields.match401k !== undefined)
@@ -7478,5 +7593,24 @@ function deleteGoal() {
     </div>
   </div>
 </div>
+
+<!-- ==================== RECURRING TEMPLATES PANEL ==================== -->
+<div id="recurring-panel-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.35);z-index:600;" onclick="if(event.target===this)closeRecurringPanel()">
+  <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--surface);border:1px solid var(--border);border-radius:12px;width:100%;max-width:480px;box-shadow:0 8px 40px rgba(0,0,0,0.18);overflow:hidden;" onclick="event.stopPropagation()">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid var(--border);">
+      <span style="font-family:var(--font-display);font-size:15px;font-weight:700;color:var(--text);">Add Recurring Items</span>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <button id="recurring-edit-btn" onclick="toggleRecurringEditMode()" style="font-size:12px;padding:4px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface2);color:var(--text2);cursor:pointer;font-family:var(--font-body);">Edit List</button>
+        <button onclick="closeRecurringPanel()" style="width:28px;height:28px;border-radius:50%;background:var(--surface2);border:1px solid var(--border);cursor:pointer;font-size:15px;color:var(--text2);display:flex;align-items:center;justify-content:center;">✕</button>
+      </div>
+    </div>
+    <div style="padding:16px 20px;">
+      <p style="font-size:12px;color:var(--text3);margin:0 0 14px;">Select which items to add. Already-present transactions are automatically skipped.</p>
+      <div id="recurring-checklist" style="display:flex;flex-direction:column;gap:8px;max-height:340px;overflow-y:auto;"></div>
+      <div id="recurring-panel-footer" style="display:flex;gap:8px;margin-top:16px;padding-top:12px;border-top:1px solid var(--border);"></div>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>
