@@ -3382,17 +3382,55 @@ function renderBSTrend(data, selVal) {
   const change = lastVal - firstVal;
   const lastX = xOf(n-1), lastY = yOf(lastVal);
   const lblY = lastY < PAD.top + 20 ? lastY + 14 : lastY - 6;
+  window._bsTrendPts = points_data.map((p,i) => ({ x: parseFloat(xOf(i).toFixed(1)), val: p.val, key: p.key }));
+  window._bsTrendPad = { l: PAD.left, t: PAD.top, cW, cH, W, H };
+
   document.getElementById('bs-trend').innerHTML = `
     <div style="font-size:11px;color:var(--text2);margin-bottom:6px;">
       <span style="font-family:var(--font-mono);font-weight:600;">${fmt(lastVal)}</span>
     </div>
-    <svg viewBox="0 0 ${W} ${H}" style="width:100%;display:block;">
-      <defs><linearGradient id="trendGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="var(--accent)" stop-opacity="0.18"/><stop offset="100%" stop-color="var(--accent)" stop-opacity="0.01"/></linearGradient></defs>
-      ${gridLines.join('')}
-      <path d="${areaPath}" fill="url(#trendGrad)"/>
-      <polyline points="${ptStr}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-      ${dots}${xLabels.join('')}
-    </svg>`;
+    <div style="position:relative;">
+      <svg id="bs-trend-svg" viewBox="0 0 ${W} ${H}" style="width:100%;display:block;">
+        <defs><linearGradient id="trendGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="var(--accent)" stop-opacity="0.18"/><stop offset="100%" stop-color="var(--accent)" stop-opacity="0.01"/></linearGradient></defs>
+        ${gridLines.join('')}
+        <path d="${areaPath}" fill="url(#trendGrad)"/>
+        <polyline points="${ptStr}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        ${dots}${xLabels.join('')}
+        <line id="bs-trend-xh" x1="0" x2="0" y1="${PAD.top}" y2="${PAD.top+cH}" stroke="var(--text3)" stroke-width="1" stroke-dasharray="3,2" display="none"/>
+        <rect data-bstrend="1" x="${PAD.left}" y="${PAD.top}" width="${cW}" height="${cH}" fill="transparent" pointer-events="all"/>
+      </svg>
+      <div id="bs-trend-tip" style="display:none;position:absolute;top:10px;background:var(--text);color:var(--bg);padding:7px 11px;border-radius:6px;font-size:11px;font-family:var(--font-mono);pointer-events:none;z-index:20;white-space:nowrap;box-shadow:0 4px 16px rgba(0,0,0,0.2);line-height:1.7;"></div>
+    </div>`;
+
+  const rect = document.querySelector('rect[data-bstrend]');
+  if (rect) {
+    const hover = e => {
+      const svg  = rect.closest('svg');
+      const bbox = svg.getBoundingClientRect();
+      const mx   = (e.clientX - bbox.left) * (W / bbox.width);
+      const pts  = window._bsTrendPts;
+      const pad  = window._bsTrendPad;
+      let nearest = pts[0], minDist = Infinity;
+      pts.forEach(p => { const d = Math.abs(p.x - mx); if (d < minDist) { minDist = d; nearest = p; } });
+      const xh  = document.getElementById('bs-trend-xh');
+      const tip = document.getElementById('bs-trend-tip');
+      const [yr, mo] = nearest.key.split('-').map(Number);
+      tip.style.display = 'block';
+      tip.innerHTML = `<div style="font-weight:700;margin-bottom:2px;">${MONTHS[mo-1]} ${yr}</div><div>${fmt(nearest.val)}</div>`;
+      const xPosScreen = (nearest.x / W) * bbox.width;
+      tip.style.left = (xPosScreen > bbox.width * 0.6 ? xPosScreen - tip.offsetWidth - 8 : xPosScreen + 8) + 'px';
+      xh.setAttribute('x1', nearest.x); xh.setAttribute('x2', nearest.x); xh.setAttribute('display','');
+    };
+    const leave = () => {
+      const tip = document.getElementById('bs-trend-tip');
+      const xh  = document.getElementById('bs-trend-xh');
+      if (tip) tip.style.display = 'none';
+      if (xh)  xh.setAttribute('display','none');
+    };
+    rect.addEventListener('mousemove',  hover);
+    rect.addEventListener('mouseenter', hover);
+    rect.addEventListener('mouseleave', leave);
+  }
 }
 
 // =====================================================================
@@ -4815,7 +4853,11 @@ function updateEntryMonthGrid() {
   const grid = document.getElementById('entry-month-grid');
   grid.innerHTML = MONTHS.map((m, i) => {
     const key = getMonthKey(year, i+1);
-    const hasData = !!data.transactions[key] || !!data.balances[key];
+    const txs = data.transactions[key] || [];
+    const bal = data.balances[key] || {};
+    const hasTxSaved  = txs.some(t => parseFloat(t.amount) !== 0 && t.amount !== '');
+    const hasBalSaved = Object.values(bal).some(v => v > 0);
+    const hasData = hasTxSaved && hasBalSaved;
     const isSelected = key === currentEntryKey;
     return `<div class="month-btn ${hasData?'has-data':''} ${isSelected?'selected':''}" onclick="selectEntryMonth('${key}')">${m}</div>`;
   }).join('');
