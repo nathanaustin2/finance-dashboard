@@ -908,7 +908,7 @@
           <div class="form-group">
             <label>Category</label>
             <select id="fce-category" onchange="updateEventFields()">
-              <option value="income">Income (annual)</option>
+              <option value="income">Income (monthly)</option>
               <option value="taxes">Taxes (monthly)</option>
               <option value="tithing">Tithing (monthly)</option>
               <option value="savings_401k">401(k) personal (monthly)</option>
@@ -919,7 +919,6 @@
               <option value="expenses">Expenses (monthly)</option>
               <option value="savings_balance">Savings — deposit / withdrawal</option>
               <option value="efund_balance">Emergency Fund — deposit / withdrawal</option>
-              <option value="carfund_balance">Car Fund — deposit / withdrawal</option>
             </select>
           </div>
           <!-- Hidden type field — set for IS items, delta for balance items -->
@@ -1024,6 +1023,20 @@
 </div> <!-- /#page-projections -->
 
 <!-- ==================== CASH FLOW ASSUMPTIONS POPUP ==================== -->
+<!-- Unified app dialog modal (replaces native alert/confirm) -->
+<div id="app-dialog-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.35);z-index:2000;align-items:center;justify-content:center;padding:24px;">
+  <div id="app-dialog-card" style="background:var(--surface);border:1px solid var(--border);border-radius:12px;width:100%;max-width:440px;box-shadow:0 8px 40px rgba(0,0,0,0.2);overflow:hidden;" onclick="event.stopPropagation()">
+    <div style="padding:20px 22px 18px;">
+      <div id="app-dialog-title" style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:8px;display:none;"></div>
+      <div id="app-dialog-message" style="font-size:13px;line-height:1.5;color:var(--text2);white-space:pre-wrap;"></div>
+    </div>
+    <div style="background:var(--surface2);padding:12px 22px;display:flex;gap:8px;justify-content:flex-end;border-top:0.5px solid var(--border);">
+      <button id="app-dialog-cancel" class="btn btn-secondary" style="font-size:12px;padding:6px 14px;" onclick="_appDialogResolve(false)">Cancel</button>
+      <button id="app-dialog-confirm" class="btn btn-primary" style="font-size:12px;padding:6px 14px;" onclick="_appDialogResolve(true)">OK</button>
+    </div>
+  </div>
+</div>
+
 <div id="assumptions-popup-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.35);z-index:500;" onclick="if(event.target===this)closeAssumptionsPopup()">
   <div style="position:absolute;top:0;left:0;right:0;bottom:0;overflow-y:auto;display:flex;justify-content:center;padding:32px 24px;" onclick="if(event.target===this)closeAssumptionsPopup()">
     <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;width:100%;max-width:960px;height:fit-content;box-shadow:0 8px 40px rgba(0,0,0,0.18);overflow:hidden;" onclick="event.stopPropagation()">
@@ -1049,6 +1062,9 @@
 
   <div class="grid-4" id="proj-kpis" style="margin-bottom:20px;"></div>
 
+  <!-- Phase tab bar -->
+  <div id="phase-tabs" style="display:flex;align-items:center;gap:4px;margin-bottom:12px;flex-wrap:wrap;min-height:28px;"></div>
+
   <div class="grid-2" style="margin-bottom:20px;">
     <div class="card" style="padding:0;overflow:hidden;">
       <table class="fin-table" id="proj-table">
@@ -1058,6 +1074,15 @@
     </div>
     <div class="card">
       <div class="card-title">Projection Assumptions</div>
+      <div id="phase-header" style="display:none;margin-bottom:12px;padding:8px 10px;background:var(--surface2);border-radius:6px;align-items:center;gap:8px;flex-wrap:wrap;">
+        <span style="font-size:11px;font-weight:500;color:var(--text2);">Starts:</span>
+        <select id="phase-start-month" onchange="updatePhaseStartMonth()" style="border:1px solid var(--border);background:var(--surface);border-radius:6px;padding:4px 8px;font-size:11px;font-family:var(--font-body);color:var(--text);cursor:pointer;">
+        </select>
+        <select id="phase-start-year" onchange="updatePhaseStartMonth()" style="border:1px solid var(--border);background:var(--surface);border-radius:6px;padding:4px 8px;font-size:11px;font-family:var(--font-body);color:var(--text);cursor:pointer;">
+        </select>
+        <div style="flex:1;"></div>
+        <button class="btn btn-danger" onclick="deleteActivePhase()" style="font-size:11px;padding:4px 10px;">Delete phase</button>
+      </div>
       <div class="form-section">
         <div class="form-section-title">Income <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text3);font-size:10px;">(Annual)</span></div>
         <div class="form-grid" style="grid-template-columns:1fr 1fr;">
@@ -1532,6 +1557,48 @@
 
 <script>
 // =====================================================================
+// APP DIALOG — replaces native alert/confirm with styled in-app modals
+// =====================================================================
+let _appDialogResolver = null;
+function _appDialogResolve(value) {
+  if (_appDialogResolver) { _appDialogResolver(value); _appDialogResolver = null; }
+  document.getElementById('app-dialog-overlay').style.display = 'none';
+  document.removeEventListener('keydown', _appDialogKeyHandler);
+}
+function _appDialogKeyHandler(e) {
+  if (e.key === 'Escape') { e.preventDefault(); _appDialogResolve(false); }
+  else if (e.key === 'Enter') { e.preventDefault(); _appDialogResolve(true); }
+}
+function appDialog({ message, title, confirmText = 'OK', cancelText = 'Cancel', showCancel = true, danger = false } = {}) {
+  return new Promise(resolve => {
+    _appDialogResolver = resolve;
+    const overlay = document.getElementById('app-dialog-overlay');
+    const titleEl = document.getElementById('app-dialog-title');
+    const msgEl   = document.getElementById('app-dialog-message');
+    const okBtn   = document.getElementById('app-dialog-confirm');
+    const cancelBtn = document.getElementById('app-dialog-cancel');
+    if (title) { titleEl.textContent = title; titleEl.style.display = 'block'; }
+    else { titleEl.style.display = 'none'; }
+    msgEl.textContent = message || '';
+    okBtn.textContent = confirmText;
+    cancelBtn.textContent = cancelText;
+    cancelBtn.style.display = showCancel ? '' : 'none';
+    // Danger variant = red confirm button
+    okBtn.className = danger ? 'btn btn-danger' : 'btn btn-primary';
+    overlay.style.display = 'flex';
+    overlay.onclick = (e) => { if (e.target === overlay) _appDialogResolve(false); };
+    document.addEventListener('keydown', _appDialogKeyHandler);
+    setTimeout(() => okBtn.focus(), 50);
+  });
+}
+function appAlert(message, opts = {}) {
+  return appDialog({ message, showCancel: false, confirmText: 'OK', ...opts });
+}
+function appConfirm(message, opts = {}) {
+  return appDialog({ message, ...opts });
+}
+
+// =====================================================================
 // FULL-SCREEN TAB
 // =====================================================================
 function openFullTab() {
@@ -1543,7 +1610,7 @@ function openFullTab() {
   const blob = new Blob([html], { type: 'text/html' });
   const url  = URL.createObjectURL(blob);
   const win  = window.open(url, '_blank');
-  if (!win) alert('Pop-up blocked — please allow pop-ups for this page and try again.');
+  if (!win) appAlert('Pop-up blocked — please allow pop-ups for this page and try again.');
 }
 
 // =====================================================================
@@ -1959,7 +2026,10 @@ function projInputBlur(el) {
 function projParseInput(id, def) {
   const el = document.getElementById(id);
   if (!el) return def;
-  return parseFloat((el.value || '').replace(/[$,]/g, '')) || def;
+  const stripped = (el.value || '').replace(/[$,]/g, '').trim();
+  if (stripped === '') return def;
+  const parsed = parseFloat(stripped);
+  return isNaN(parsed) ? def : parsed;
 }
 
 function invInputFocus(el) {
@@ -2380,7 +2450,7 @@ function renderIS() {
     return renderIS();
   }
   const numMonths = toAbs - fromAbs + 1;
-  if (numMonths > 24) { alert('Please select a range of 24 months or fewer.'); return; }
+  if (numMonths > 24) { appAlert('Please select a range of 24 months or fewer.'); return; }
 
   const periods = [];
   let y = fromYear, m = fromMonth;
@@ -2964,19 +3034,16 @@ function buildGoalForecastSeries() {
 
   // Use getFcDefaults() which reads actual computed DOM values — same source as renderForecast
   const def = getFcDefaults();
-  const grossIncomeMo = def.grossIncomeMo;
-  const taxesMo       = def.taxesMo;
-  const tithingMo     = def.tithingMo;
-  const s401kMo       = def.s401kMo;
-  const m401kMo       = def.m401kMo;
-  const rothMo        = def.rothMo;
-  const hsaMo         = def.hsaMo;
-  const matchHsaMo    = def.matchHsaMo;
-  const expensesMo    = def.expensesMo;
   const investRatePct = def.investRatePct;
   const cashRatePct   = def.cashRatePct;
   const investG = Math.pow(1 + investRatePct / 100, 1/12) - 1;
   const cashG   = Math.pow(1 + cashRatePct   / 100, 1/12) - 1;
+
+  // Phase-aware seeds: each month may have different inputs if phases are defined
+  const phaseSeedCache = new Map();
+  const seedsForMonth = (key) => sc
+    ? getSeedsForMonth(sc, key, phaseSeedCache)
+    : def;
 
   // Seed from latest actual balances
   const balKeys = Object.keys(data.balances || {}).filter(k => /^\d{4}-\d{2}$/.test(k)).sort();
@@ -3015,17 +3082,18 @@ function buildGoalForecastSeries() {
     m++; if (m > 12) { m = 1; y++; }
     const key = getMonthKey(y, m);
 
+    const monthDef = seedsForMonth(key);
     const proj = {
-      grossIncome: grossIncomeMo, taxes: taxesMo, tithing: tithingMo,
-      s401k: s401kMo, m401k: m401kMo, roth: rothMo,
-      hsa: hsaMo, matchHsa: matchHsaMo, expenses: expensesMo,
+      grossIncome: monthDef.grossIncomeMo, taxes: monthDef.taxesMo, tithing: monthDef.tithingMo,
+      s401k: monthDef.s401kMo, m401k: monthDef.m401kMo, roth: monthDef.rothMo,
+      hsa: monthDef.hsaMo, matchHsa: monthDef.matchHsaMo, expenses: monthDef.expensesMo,
     };
 
     // Apply scenario events for this month (mirrors applyEvents logic)
     for (const ev of events) {
       if (ev.month !== key) continue;
       switch (ev.category) {
-        case 'income':            proj.grossIncome = ev.amount / 12; break;
+        case 'income':            proj.grossIncome = ev.amount; break;
         case 'taxes':             proj.taxes       = ev.amount; break;
         case 'tithing':           proj.tithing     = ev.amount; break;
         case 'expenses':          proj.expenses    = ev.amount; break;
@@ -3036,7 +3104,6 @@ function buildGoalForecastSeries() {
         case 'savings_hsa':       proj.hsa         = ev.amount; break;
         case 'savings_balance':   proj.savingsDelta = (proj.savingsDelta || 0) + ev.amount; break;
         case 'efund_balance':     proj.efundDelta   = (proj.efundDelta   || 0) + ev.amount; break;
-        case 'carfund_balance':   proj.carfundDelta = (proj.carfundDelta || 0) + ev.amount; break;
       }
     }
 
@@ -3583,8 +3650,10 @@ function getProjAssumptions() {
   const inc1 = _inc1 === '' ? 51500 : parseFloat(_inc1);
   const inc2 = _inc2 === '' ? 38400 : parseFloat(_inc2);
   const gross = inc1 + inc2;
-  const s401kPct  = parseFloat(document.getElementById('proj-401k-pct').value) / 100 || 0.05;
-  const m401kPct  = parseFloat(document.getElementById('proj-match401k-pct').value) / 100 || 0.04;
+  const _s401k = parseFloat(document.getElementById('proj-401k-pct').value);
+  const s401kPct = isNaN(_s401k) ? 0.05 : _s401k / 100;
+  const _m401k = parseFloat(document.getElementById('proj-match401k-pct').value);
+  const m401kPct = isNaN(_m401k) ? 0.04 : _m401k / 100;
   const s401k     = (inc1 * s401kPct) / 12;
   const m401k     = (inc1 * m401kPct) / 12;
   const sRothNate = projParseInput('proj-roth-nate', 0);
@@ -3594,8 +3663,10 @@ function getProjAssumptions() {
   const mHSA      = projParseInput('proj-matchhsa', 0);
   const children  = parseInt(document.getElementById('proj-children').value) || 0;
   const is401kPretax = document.getElementById('proj-401k-pretax')?.value === '1';
-  const payrollPct = parseFloat(document.getElementById('proj-payroll').value) / 100 || 0.0765;
-  const tithePct   = parseFloat(document.getElementById('proj-tithe').value)   / 100 || 0.102;
+  const _payroll = parseFloat(document.getElementById('proj-payroll').value);
+  const payrollPct = isNaN(_payroll) ? 0.0765 : _payroll / 100;
+  const _tithe = parseFloat(document.getElementById('proj-tithe').value);
+  const tithePct   = isNaN(_tithe) ? 0.102 : _tithe / 100;
   const hsaAnnual   = sHSA * 12;
   const k401Annual  = s401k * 12;  // annual personal 401k contribution
   // Pre-tax deductions reduce federal income, state income, AND payroll tax base
@@ -3645,8 +3716,10 @@ function renderProjection() {
   const inc2 = _inc2 === '' ? 38400 : parseFloat(_inc2);
   const gross = inc1 + inc2;
   const grossMo = gross / 12;
-  const s401kPct  = parseFloat(document.getElementById('proj-401k-pct').value) / 100 || 0.05;
-  const m401kPct  = parseFloat(document.getElementById('proj-match401k-pct').value) / 100 || 0.04;
+  const _s401k = parseFloat(document.getElementById('proj-401k-pct').value);
+  const s401kPct = isNaN(_s401k) ? 0.05 : _s401k / 100;
+  const _m401k = parseFloat(document.getElementById('proj-match401k-pct').value);
+  const m401kPct = isNaN(_m401k) ? 0.04 : _m401k / 100;
   const s401k     = (inc1 * s401kPct) / 12;
   const m401k     = (inc1 * m401kPct) / 12;
   const sRothNate = projParseInput('proj-roth-nate', 0);
@@ -3664,8 +3737,10 @@ function renderProjection() {
   if (d401kEl)  d401kEl.textContent  = fmt(s401k) + '/mo';
   if (dm401kEl) dm401kEl.textContent = fmt(m401k) + '/mo';
 
-  const payrollPct = parseFloat(document.getElementById('proj-payroll').value) / 100 || 0.0765;
-  const tithePct   = parseFloat(document.getElementById('proj-tithe').value)   / 100 || 0.102;
+  const _payroll = parseFloat(document.getElementById('proj-payroll').value);
+  const payrollPct = isNaN(_payroll) ? 0.0765 : _payroll / 100;
+  const _tithe = parseFloat(document.getElementById('proj-tithe').value);
+  const tithePct   = isNaN(_tithe) ? 0.102 : _tithe / 100;
   const hsaAnnual      = sHSA * 12;
   const k401Annual     = s401k * 12;
   const pretaxDeduct   = hsaAnnual + (is401kPretax ? k401Annual : 0);
@@ -3808,6 +3883,9 @@ function renderProjection() {
     </div>
     <div style="font-size:11px;color:var(--text3);margin-top:10px;">HSA contributions via payroll reduce federal, state, and payroll taxes. Roth 401k contributions have no tax benefit. Estimates only — consult a tax professional.</div>
   `;
+
+  // Refresh forecast tab so phase/input changes propagate live
+  if (typeof renderForecast === 'function') renderForecast();
 }
 
 // =====================================================================
@@ -3848,12 +3926,14 @@ function initScenarios() {
     const idA = 'sc_' + Date.now();
     const idB = 'sc_' + (Date.now() + 1);
     scenarios = [
-      { id: idA, name: 'Scenario A', inputs: { ...DEFAULT_SCENARIO_VALUES }, events: [] },
-      { id: idB, name: 'Scenario B', inputs: { ...DEFAULT_SCENARIO_VALUES }, events: [] },
+      { id: idA, name: 'Scenario A', inputs: { ...DEFAULT_SCENARIO_VALUES }, events: [], phases: [] },
+      { id: idB, name: 'Scenario B', inputs: { ...DEFAULT_SCENARIO_VALUES }, events: [], phases: [] },
     ];
     activeScenarioId = idB;
     saveScenarios();
   }
+  // Migration: ensure all scenarios have a phases array
+  scenarios.forEach(sc => { if (!Array.isArray(sc.phases)) sc.phases = []; });
   loadActiveScenario();
 }
 
@@ -3867,13 +3947,20 @@ function saveScenarios() {
 function captureCurrentInputs() {
   const sc = scenarios.find(s => s.id === activeScenarioId);
   if (!sc) return;
+  const target = activePhaseId === 'base'
+    ? sc.inputs
+    : (sc.phases.find(p => p.id === activePhaseId)?.inputs);
+  if (!target) return;
   PROJ_INPUT_IDS.forEach(id => {
     const el = document.getElementById(id);
     if (!el) return;
-    // Store raw numbers — strip $ and commas from dollar fields
-    sc.inputs[id] = PROJ_DOLLAR_IDS.has(id)
-      ? String(parseFloat((el.value || '').replace(/[$,]/g, '')) || '')
-      : el.value;
+    if (PROJ_DOLLAR_IDS.has(id)) {
+      // Store raw numbers — preserve 0 (don't let `|| ''` swallow it)
+      const parsed = parseFloat((el.value || '').replace(/[$,]/g, ''));
+      target[id] = isNaN(parsed) ? '' : String(parsed);
+    } else {
+      target[id] = el.value;
+    }
   });
   saveScenarios();
 }
@@ -3881,31 +3968,183 @@ function captureCurrentInputs() {
 function loadActiveScenario() {
   const sc = scenarios.find(s => s.id === activeScenarioId);
   if (!sc) return;
+  // Reset to base phase view whenever scenario changes
+  activePhaseId = 'base';
+  loadPhaseIntoForm(sc, 'base');
+  // Sync forecast events from the scenario
+  fcEvents = sc.events ? sc.events.map(e => ({ ...e })) : [];
+  fcEventIdCounter = fcEvents.length > 0 ? Math.max(...fcEvents.map(e => e.id)) + 1 : 0;
+  sync401kToggleUI();
+  renderScenarioTabs();
+  renderPhaseSidebar();
+  renderEventsList();
+  updateCopyEventsDropdown();
+  renderProjection();
+  renderForecast();
+  renderScenarioTabs();
+}
+
+// ---- Phases ----
+let activePhaseId = 'base';
+
+function getActivePhaseInputs(sc) {
+  // 'base' → sc.inputs; else → sc.phases[i].inputs
+  if (activePhaseId === 'base') return sc.inputs;
+  const p = sc.phases.find(x => x.id === activePhaseId);
+  return p ? p.inputs : sc.inputs;
+}
+
+function loadPhaseIntoForm(sc, phaseId) {
+  const inputs = phaseId === 'base'
+    ? sc.inputs
+    : (sc.phases.find(p => p.id === phaseId)?.inputs || sc.inputs);
   PROJ_INPUT_IDS.forEach(id => {
     const el = document.getElementById(id);
-    if (!el || sc.inputs[id] === undefined) return;
+    if (!el || inputs[id] === undefined) return;
     if (PROJ_DOLLAR_IDS.has(id)) {
-      // Reformat stored raw number as $X,XXX
-      const raw = parseFloat(sc.inputs[id]);
+      const raw = parseFloat(inputs[id]);
       if (!isNaN(raw)) {
         el.value = '$' + (Number.isInteger(raw)
           ? raw.toLocaleString()
           : raw.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2}));
       }
     } else {
-      el.value = sc.inputs[id];
+      el.value = inputs[id];
     }
   });
-  // Sync forecast events from the scenario
-  fcEvents = sc.events ? sc.events.map(e => ({ ...e })) : [];
-  fcEventIdCounter = fcEvents.length > 0 ? Math.max(...fcEvents.map(e => e.id)) + 1 : 0;
   sync401kToggleUI();
-  renderScenarioTabs();
-  renderEventsList();
-  updateCopyEventsDropdown();
+}
+
+function switchPhase(phaseId) {
+  const sc = scenarios.find(s => s.id === activeScenarioId);
+  if (!sc) return;
+  // Save current form values to the currently-active phase before switching
+  captureCurrentInputs();
+  activePhaseId = phaseId;
+  loadPhaseIntoForm(sc, phaseId);
+  renderPhaseSidebar();
   renderProjection();
   renderForecast();
-  renderScenarioTabs();
+}
+
+function addPhase() {
+  const sc = scenarios.find(s => s.id === activeScenarioId);
+  if (!sc) return;
+  // Save any pending edits to the current phase
+  captureCurrentInputs();
+  // Source for inherited values: the latest existing phase, else base
+  const sourceInputs = sc.phases.length > 0
+    ? sc.phases[sc.phases.length - 1].inputs
+    : sc.inputs;
+  // Default start month: 1 year out (or later than latest phase)
+  const today = new Date();
+  let defaultYr = today.getFullYear() + 1;
+  let defaultMo = 1;
+  if (sc.phases.length > 0) {
+    const [ly, lm] = sc.phases[sc.phases.length - 1].startMonth.split('-').map(Number);
+    defaultYr = lm >= 12 ? ly + 1 : ly;
+    defaultMo = lm >= 12 ? 1 : lm + 1;
+  }
+  const newPhase = {
+    id: 'ph_' + Date.now(),
+    startMonth: `${defaultYr}-${String(defaultMo).padStart(2,'0')}`,
+    inputs: { ...sourceInputs },
+  };
+  sc.phases.push(newPhase);
+  sc.phases.sort((a, b) => a.startMonth.localeCompare(b.startMonth));
+  saveScenarios();
+  activePhaseId = newPhase.id;
+  loadPhaseIntoForm(sc, newPhase.id);
+  renderPhaseSidebar();
+  renderProjection();
+  renderForecast();
+}
+
+async function deleteActivePhase() {
+  if (activePhaseId === 'base') return;
+  const sc = scenarios.find(s => s.id === activeScenarioId);
+  if (!sc) return;
+  const ok = await appConfirm('Delete this phase? The projection will revert to the base situation from its start month onward.', { confirmText: 'Delete', danger: true });
+  if (!ok) return;
+  sc.phases = sc.phases.filter(p => p.id !== activePhaseId);
+  saveScenarios();
+  activePhaseId = 'base';
+  loadPhaseIntoForm(sc, 'base');
+  renderPhaseSidebar();
+  renderProjection();
+  renderForecast();
+}
+
+function updatePhaseStartMonth() {
+  const sc = scenarios.find(s => s.id === activeScenarioId);
+  if (!sc || activePhaseId === 'base') return;
+  const mo = document.getElementById('phase-start-month').value;
+  const yr = document.getElementById('phase-start-year').value;
+  const newKey = `${yr}-${String(mo).padStart(2,'0')}`;
+  const phase = sc.phases.find(p => p.id === activePhaseId);
+  if (!phase) return;
+  phase.startMonth = newKey;
+  sc.phases.sort((a, b) => a.startMonth.localeCompare(b.startMonth));
+  saveScenarios();
+  renderPhaseSidebar();
+  renderForecast();
+}
+
+function renderPhaseSidebar() {
+  const el = document.getElementById('phase-tabs');
+  if (!el) return;
+  const sc = scenarios.find(s => s.id === activeScenarioId);
+  if (!sc) { el.innerHTML = ''; return; }
+
+  const fmtMonthLabel = (key) => {
+    const [y, m] = key.split('-').map(Number);
+    return `${MONTHS[m-1]} ${String(y).slice(2)}`;
+  };
+  const tab = (label, id, isActive) => `
+    <button onclick="switchPhase('${id}')" style="
+      padding:4px 10px;border-radius:5px;font-size:11px;font-weight:${isActive?600:500};
+      cursor:pointer;border:1px solid ${isActive?'var(--accent)':'var(--border)'};
+      background:${isActive?'var(--accent)':'var(--surface)'};
+      color:${isActive?'white':'var(--text2)'};
+      transition:all 0.12s;white-space:nowrap;line-height:1.2;">${label}</button>`;
+
+  const baseTab = tab('Base', 'base', activePhaseId === 'base');
+  const phaseTabs = sc.phases.map(p =>
+    tab(fmtMonthLabel(p.startMonth), p.id, activePhaseId === p.id)
+  ).join('');
+  const addBtn = `
+    <button onclick="addPhase()" title="Add phase" style="
+      padding:4px 8px;border-radius:5px;font-size:11px;font-weight:500;
+      cursor:pointer;border:1px dashed var(--border);background:transparent;
+      color:var(--text3);transition:all 0.12s;line-height:1.2;"
+      onmouseenter="this.style.color='var(--accent)';this.style.borderColor='var(--accent)'"
+      onmouseleave="this.style.color='var(--text3)';this.style.borderColor='var(--border)'">+ Add Phase</button>`;
+
+  el.innerHTML = baseTab + phaseTabs + addBtn;
+
+  // Update phase-header (start-month picker + delete) visibility + values
+  const header = document.getElementById('phase-header');
+  if (header) {
+    if (activePhaseId === 'base') {
+      header.style.display = 'none';
+    } else {
+      header.style.display = 'flex';
+      const phase = sc.phases.find(p => p.id === activePhaseId);
+      if (phase) {
+        const [y, m] = phase.startMonth.split('-').map(Number);
+        const moSel = document.getElementById('phase-start-month');
+        const yrSel = document.getElementById('phase-start-year');
+        moSel.innerHTML = MONTHS.map((mn, i) =>
+          `<option value="${i+1}"${i+1===m?' selected':''}>${mn}</option>`).join('');
+        const curYear = new Date().getFullYear();
+        let years = [];
+        for (let yy = curYear; yy <= curYear + 6; yy++) years.push(yy);
+        if (!years.includes(y)) years = [y, ...years].sort();
+        yrSel.innerHTML = years.map(yy =>
+          `<option value="${yy}"${yy===y?' selected':''}>${yy}</option>`).join('');
+      }
+    }
+  }
 }
 
 function renderScenarioTabs() {
@@ -3989,6 +4228,7 @@ function addScenario() {
     name,
     inputs: activeSc ? { ...activeSc.inputs } : { ...DEFAULT_SCENARIO_VALUES },
     events: activeSc ? activeSc.events.map(e => ({ ...e, id: fcEventIdCounter++ })) : [],
+    phases: activeSc ? activeSc.phases.map(p => ({ ...p, inputs: { ...p.inputs } })) : [],
   });
   saveScenarios();
   switchScenario(newId);
@@ -4090,11 +4330,12 @@ function updateCopyEventsDropdown() {
     others.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
 }
 
-function copyEventsFrom(srcId) {
+async function copyEventsFrom(srcId) {
   if (!srcId) return;
   const src = scenarios.find(s => s.id === srcId);
   if (!src) return;
-  if (!confirm(`Copy all events from "${src.name}" into the active scenario? This will add them on top of existing events.`)) {
+  const ok = await appConfirm(`Copy all events from "${src.name}" into the active scenario? This will add them on top of existing events.`, { confirmText: 'Copy' });
+  if (!ok) {
     document.getElementById('fc-copy-events-from').value = '';
     return;
   }
@@ -4242,7 +4483,7 @@ function getCurrentEventValue(cat) {
   const s401kPct = parseFloat(document.getElementById('proj-401k-pct')?.value || 5) / 100;
   const s401k = (inc1 * s401kPct) / 12;
   switch (cat) {
-    case 'income':            return fmt(inc1 + inc2) + '/yr';
+    case 'income':            return fmt((inc1 + inc2) / 12) + '/mo';
     case 'taxes':             return fmt(projParseInput('fca-taxes', 1092)) + '/mo';
     case 'tithing':           return fmt((inc1 + inc2) * 0.102 / 12) + '/mo';
     case 'savings_401k':      return fmt(s401k) + '/mo';
@@ -4255,7 +4496,7 @@ function getCurrentEventValue(cat) {
   }
 }
 
-const BALANCE_CATEGORIES = new Set(['savings_balance','efund_balance','carfund_balance']);
+const BALANCE_CATEGORIES = new Set(['savings_balance','efund_balance']);
 
 function updateEventFields() {
   const cat = document.getElementById('fce-category').value;
@@ -4264,10 +4505,9 @@ function updateEventFields() {
   const endGroup = document.getElementById('fce-end-month-group');
   const isBalance = BALANCE_CATEGORIES.has(cat);
   const labels = {
-    income: 'Annual income ($)',
+    income: 'Monthly income ($)',
     savings_balance:  'Amount ($)',
     efund_balance:    'Amount ($)',
-    carfund_balance:  'Amount ($)',
   };
   if (lbl) lbl.textContent = labels[cat] || 'New amount ($)';
   const current = getCurrentEventValue(cat);
@@ -4287,7 +4527,14 @@ function saveEvent() {
   const type       = BALANCE_CATEGORIES.has(category) ? 'add' : 'set';
   const amount     = parseFloat(document.getElementById('fce-amount').value);
   const note       = document.getElementById('fce-note').value.trim();
-  if (isNaN(amount)) { alert('Please enter a valid amount.'); return; }
+  if (isNaN(amount)) { appAlert('Please enter a valid amount.'); return; }
+
+  if (editingEventId !== null) {
+    // Remove all events in the same group as the edited event, then re-add
+    const ev = fcEvents.find(e => e.id === editingEventId);
+    const oldGroupId = ev ? ev.groupId : null;
+    fcEvents = fcEvents.filter(e => oldGroupId ? e.groupId !== oldGroupId : e.id !== editingEventId);
+  }
 
   // Build list of months in range
   const months = [];
@@ -4298,14 +4545,6 @@ function saveEvent() {
     mo++; if (mo > 12) { mo = 1; yr++; }
   }
   if (months.length === 0) months.push(startMonth);
-
-  if (editingEventId !== null) {
-    // Remove all events in the same group as the edited event, then re-add
-    const ev = fcEvents.find(e => e.id === editingEventId);
-    const oldGroupId = ev ? ev.groupId : null;
-    fcEvents = fcEvents.filter(e => oldGroupId ? e.groupId !== oldGroupId : e.id !== editingEventId);
-  }
-
   const groupId = months.length > 1 ? 'grp_' + Date.now() : null;
   months.forEach(month => {
     fcEvents.push({ id: fcEventIdCounter++, month, category, type, amount, note, groupId });
@@ -4395,7 +4634,8 @@ function seedForecastDefaults() {
   const gross = p.gross;
 
   // Total monthly taxes from proj tab calculations
-  const sHSA = parseFloat(document.getElementById('proj-hsa').value) || 266.66;
+  const _sHSA = parseFloat(document.getElementById('proj-hsa').value.replace(/[$,]/g,''));
+  const sHSA = isNaN(_sHSA) ? 266.66 : _sHSA;
   const is401kPretaxSeed = document.getElementById('proj-401k-pretax')?.value === '1';
   const s401kSeed = p.s401k * 12; // annual
   const hsaAnnual = sHSA * 12;
@@ -4417,11 +4657,13 @@ function seedForecastDefaults() {
   const utahLine16 = 32200 * 0.06;
   const utahLine19 = Math.max(0, utahLine9 - 36426) * 0.013;
   const utahTax    = Math.max(0, utahLine10 - Math.max(0, utahLine16 - utahLine19));
-  const payrollPct = parseFloat(document.getElementById('proj-payroll').value)/100 || 0.0765;
+  const _payrollSeed = parseFloat(document.getElementById('proj-payroll').value);
+  const payrollPct = isNaN(_payrollSeed) ? 0.0765 : _payrollSeed / 100;
   const payrollTax = (gross - hsaAnnual) * payrollPct;  // 401k pre-tax does NOT reduce FICA
   const totalTaxMo = (fedTax + utahTax + payrollTax) / 12;
 
-  const tithePct = parseFloat(document.getElementById('proj-tithe').value)/100 || 0.102;
+  const _titheSeed = parseFloat(document.getElementById('proj-tithe').value);
+  const tithePct = isNaN(_titheSeed) ? 0.102 : _titheSeed / 100;
   const titheMo  = (gross / 12) * tithePct;
 
   // CTC: reduce federal tax in seed calculation too
@@ -4470,6 +4712,91 @@ function seedForecastDefaults() {
   }
 }
 
+// Compute monthly seed values from a raw inputs dict (same math as seedForecastDefaults).
+// Used by the forecast engine to compute per-phase defaults.
+function computeSeedsFromInputs(inputs) {
+  const num = (key, def) => {
+    const raw = inputs[key];
+    if (raw === undefined || raw === null || raw === '') return def;
+    const parsed = parseFloat(String(raw).replace(/[$,]/g, ''));
+    return isNaN(parsed) ? def : parsed;
+  };
+  const inc1   = num('proj-inc1', 51500);
+  const inc2   = num('proj-inc2', 38400);
+  const gross  = inc1 + inc2;
+  const pct401k  = num('proj-401k-pct', 5) / 100;
+  const pctMatch = num('proj-match401k-pct', 4) / 100;
+  const is401kPretax = String(inputs['proj-401k-pretax']) === '1';
+  const hsaMo      = num('proj-hsa', 266.66);
+  const matchHsaMo = num('proj-matchhsa', 100);
+  const rothNate   = num('proj-roth-nate', 625);
+  const rothAlly   = num('proj-roth-ally', 625);
+  const expensesMo = num('p-expenses', 3000);
+  const payrollPct = num('proj-payroll', 7.65) / 100;
+  const tithePct   = num('proj-tithe', 10.2) / 100;
+  const children   = parseInt(inputs['proj-children']) || 0;
+
+  const s401kMo = (inc1 * pct401k)  / 12;
+  const m401kMo = (inc1 * pctMatch) / 12;
+
+  // Federal tax (same brackets/method as seedForecastDefaults)
+  const pretaxAnnual = hsaMo * 12 + (is401kPretax ? s401kMo * 12 : 0);
+  const fedTaxable = Math.max(0, gross - pretaxAnnual - 32200);
+  let fedTax = 0;
+  const brackets = [[24800,0.10],[76000,0.12],[187600,0.22]];
+  let rem = fedTaxable, prev = 0;
+  for (const [cap, rate] of brackets) {
+    if (rem <= 0) break;
+    const chunk = Math.min(rem, cap - prev);
+    fedTax += chunk * rate;
+    rem -= chunk; prev = cap;
+  }
+  // Utah state tax
+  const utahLine9 = gross - pretaxAnnual;
+  const utahLine10 = utahLine9 * 0.045;
+  const utahLine16 = 32200 * 0.06;
+  const utahLine19 = Math.max(0, utahLine9 - 36426) * 0.013;
+  const utahTax = Math.max(0, utahLine10 - Math.max(0, utahLine16 - utahLine19));
+  const payrollTax = (gross - hsaMo * 12) * payrollPct;
+  const ctcAnnual  = children * 2200;
+  const taxesMo    = (fedTax + utahTax + payrollTax - ctcAnnual) / 12;
+  const tithingMo  = (gross / 12) * tithePct;
+
+  return {
+    grossIncomeMo: gross / 12,
+    taxesMo,
+    tithingMo,
+    s401kMo,
+    m401kMo,
+    rothMo: rothNate + rothAlly,
+    hsaMo,
+    matchHsaMo,
+    expensesMo,
+    cashRatePct:   parseFloat(document.getElementById('proj-cash-return')?.value) || 2.0,
+    investRatePct: parseFloat(document.getElementById('proj-return')?.value)      || 8,
+  };
+}
+
+// Returns the inputs dict that is active for a given month.
+// Picks the latest phase with startMonth <= monthKey, falling back to base inputs.
+function getPhaseInputsForMonth(sc, monthKey) {
+  if (!sc.phases || sc.phases.length === 0) return sc.inputs;
+  const active = sc.phases
+    .filter(p => p.startMonth <= monthKey)
+    .sort((a, b) => a.startMonth.localeCompare(b.startMonth));
+  return active.length > 0 ? active[active.length - 1].inputs : sc.inputs;
+}
+
+// Returns monthly seed values for a given month (phase-aware).
+// Caches by the inputs reference identity — all months in the same phase share a seed object.
+function getSeedsForMonth(sc, monthKey, cache) {
+  const inputs = getPhaseInputsForMonth(sc, monthKey);
+  if (cache.has(inputs)) return cache.get(inputs);
+  const seeds = computeSeedsFromInputs(inputs);
+  cache.set(inputs, seeds);
+  return seeds;
+}
+
 function getFcDefaults() {
   return {
     grossIncomeMo: (parseFloat(document.getElementById('fca-income').value)    || 89900) / 12,
@@ -4492,7 +4819,7 @@ function applyEvents(monthKey, proj) {
   for (const ev of events) {
     switch (ev.category) {
       // IS-line items — always set to the specified value
-      case 'income':            proj.grossIncome = ev.amount / 12; break;
+      case 'income':            proj.grossIncome = ev.amount; break;
       case 'taxes':             proj.taxes       = ev.amount; break;
       case 'tithing':           proj.tithing     = ev.amount; break;
       case 'savings_401k':      proj.s401k       = ev.amount; break;
@@ -4504,7 +4831,6 @@ function applyEvents(monthKey, proj) {
       // Balance items — always apply as delta (positive = deposit, negative = withdrawal)
       case 'savings_balance':  proj.savingsDelta = (proj.savingsDelta || 0) + ev.amount; break;
       case 'efund_balance':    proj.efundDelta   = (proj.efundDelta   || 0) + ev.amount; break;
-      case 'carfund_balance':  proj.carfundDelta = (proj.carfundDelta || 0) + ev.amount; break;
     }
   }
 }
@@ -4527,6 +4853,15 @@ function renderForecast() {
   }
 
   const def = getFcDefaults();
+
+  // Phase-aware seeds: each month may have different income/taxes/etc if a phase change is active.
+  // Base def (from getFcDefaults) reflects the currently-viewed phase in the UI, so we need to
+  // compute per-month seeds from the active scenario's phases instead.
+  const activeScenarioForPhases = scenarios.find(s => s.id === activeScenarioId);
+  const phaseSeedCache = new Map();
+  const seedsForMonth = (key) => activeScenarioForPhases
+    ? getSeedsForMonth(activeScenarioForPhases, key, phaseSeedCache)
+    : def;
 
   // ---- Anchor column: most recent actual month from localStorage or HISTORICAL_IS ----
   const latestActual2 = getLatestActualMonth();
@@ -4745,11 +5080,12 @@ function renderForecast() {
       }
     }
 
-    // Forecast month
+    // Forecast month — use phase-aware seeds
+    const monthDef = seedsForMonth(key);
     const proj = {
-      grossIncome: def.grossIncomeMo, taxes: def.taxesMo, tithing: def.tithingMo,
-      s401k: def.s401kMo, m401k: def.m401kMo, roth: def.rothMo,
-      hsa: def.hsaMo, matchHsa: def.matchHsaMo, expenses: def.expensesMo,
+      grossIncome: monthDef.grossIncomeMo, taxes: monthDef.taxesMo, tithing: monthDef.tithingMo,
+      s401k: monthDef.s401kMo, m401k: monthDef.m401kMo, roth: monthDef.rothMo,
+      hsa: monthDef.hsaMo, matchHsa: monthDef.matchHsaMo, expenses: monthDef.expensesMo,
     };
     applyEvents(key, proj);
 
@@ -5583,11 +5919,11 @@ function saveBalanceData() {
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-function clearBalanceInputs() {
+async function clearBalanceInputs() {
   if (!currentEntryKey) return;
-  if (!confirm('Clear saved balances for this month? This cannot be undone.')) return;
+  if (!await appConfirm('Clear saved balances for this month? This cannot be undone.', { confirmText: 'Clear', danger: true })) return;
   const [yr, mo] = currentEntryKey.split('-').map(Number);
-  if (!confirm(`Clear saved balances for ${MONTHS[mo-1]} ${yr}? This cannot be undone.`)) return;
+  if (!await appConfirm(`Clear saved balances for ${MONTHS[mo-1]} ${yr}? This cannot be undone.`, { confirmText: 'Clear', danger: true })) return;
   const data = loadData();
   delete data.balances[currentEntryKey];
   saveData(data);
@@ -6983,7 +7319,7 @@ function saveGoalEdit() {
   const waterfall         = document.getElementById('gm-waterfall').checked;
   const waterfallPriority = waterfall ? (parseInt(document.getElementById('gm-waterfall-priority').value) || 1) : null;
 
-  if (!name || !target) { alert('Please enter a goal name and target amount.'); return; }
+  if (!name || !target) { appAlert('Please enter a goal name and target amount.'); return; }
 
   const data  = loadData();
   const goals = data.goals || getDefaultGoals();
@@ -6996,7 +7332,7 @@ function saveGoalEdit() {
       g.waterfallPriority === waterfallPriority
     );
     if (conflict) {
-      alert(`Priority ${waterfallPriority} is already assigned to "${conflict.name}". Please choose a different priority.`);
+      appAlert(`Priority ${waterfallPriority} is already assigned to "${conflict.name}". Please choose a different priority.`);
       return;
     }
   }
@@ -7684,18 +8020,17 @@ function importDashboardData(input) {
         throw new Error('Invalid format');
       localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
       input.value = '';
-      alert('✓ Data imported successfully. The page will now reload to apply your data.');
-      location.reload();
+      appAlert('✓ Data imported successfully. The page will now reload to apply your data.').then(() => location.reload());
     } catch(err) {
-      alert('Import failed — the file doesn\'t look like a valid dashboard export. (' + err.message + ')');
+      appAlert('Import failed — the file doesn\'t look like a valid dashboard export. (' + err.message + ')');
     }
   };
   reader.readAsText(file);
 }
 
-function deleteGoal() {
+async function deleteGoal() {
   if (editingGoalIdx === -1) return;
-  if (!confirm('Delete this goal?')) return;
+  if (!await appConfirm('Delete this goal?', { confirmText: 'Delete', danger: true })) return;
   const data  = loadData();
   const goals = data.goals || getDefaultGoals();
   goals.splice(editingGoalIdx, 1);
