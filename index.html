@@ -118,6 +118,7 @@
   .fin-table td { padding: 7px 12px; text-align: right; font-family: var(--font-mono); font-size: 12px; }
   .fin-table td:first-child { text-align: left; font-family: var(--font-body); }
   .fin-table tr:hover td { background: var(--surface2); }
+  .fin-table tr.total-row:hover td { background: var(--text); color: var(--bg); }
   .fin-table tr.tx-income td { background: #E8F5E4; }
   .fin-table tr.tx-income:hover td { background: #D8EDD8; }
   .fin-table tr.tx-taxes td { background: #FAE6E6; }
@@ -206,7 +207,7 @@
   .fin-table .section-header td:first-child { border-left: 3px solid var(--accent); padding-left: 9px; }
   .fin-table .subtotal td { font-weight: 600; color: var(--text); border-top: 1px solid var(--border); }
   .fin-table .bracket-active td { font-weight: 600; color: var(--text); }
-  .fin-table .total-row td { font-weight: 700; font-size: 13px; background: var(--text); color: var(--bg); }
+  .fin-table .total-row td { font-weight: 700; font-size: 13px; background: var(--text) !important; color: var(--bg) !important; }
   .fin-table .indent { padding-left: 28px !important; color: var(--text2); }
   .fin-table .indent2 { padding-left: 44px !important; color: var(--text3); font-size: 11px; }
   .pos-val { color: var(--positive); }
@@ -327,7 +328,7 @@
   .is-key-row td { font-weight: 700; font-size: 13px; background: var(--accent-bg) !important; color: var(--accent); }
 
   .is-preset { font-size: 12px; padding: 6px 12px; }
-  .is-preset.active { background: var(--accent-bg); border-color: #C5D9B0; color: var(--accent); font-weight: 600; }
+  .is-preset.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
   .is-monthly-table { min-width: 100%; }
   .is-monthly-table th {
     font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em;
@@ -341,11 +342,12 @@
   .is-monthly-table td.row-label.indent { padding-left: 28px; font-size: 12px; color: var(--text2); }
   .is-monthly-table td.row-label.indent2 { padding-left: 44px; font-size: 11px; color: var(--text3); }
   .is-monthly-table tr:hover td { background: var(--surface2) !important; }
+  .is-monthly-table tr.total-row:hover td { background: var(--text) !important; color: var(--bg) !important; }
   .is-monthly-table .section-header td { font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; background: var(--surface2) !important; padding: 8px 14px; font-family: var(--font-body); color: var(--text); }
   .is-monthly-table .section-header td.row-label { border-left: 3px solid var(--accent); padding-left: 11px; }
   .is-monthly-table .subtotal td { font-weight: 600; border-top: 1px solid var(--border); }
   .is-monthly-table .is-key-row td { font-weight: 700; background: var(--accent-bg) !important; color: var(--accent); }
-  .is-monthly-table .total-row td { font-weight: 700; font-size: 13px; background: var(--text) !important; color: var(--bg); }
+  .is-monthly-table .total-row td { font-weight: 700; font-size: 13px; background: var(--text) !important; color: var(--bg) !important; }
   .is-monthly-table td.total-col { border-left: 2px solid var(--border); color: var(--text2); font-size: 11px; }
   .is-monthly-table .savings-group-row td { background: var(--gold-bg) !important; border-top: 1px solid #E8D89A; }
   .is-monthly-table .savings-group-row td.row-label { font-weight: 600; color: var(--gold); font-size: 12px; border-left: 3px solid var(--gold); padding-left: 11px; }
@@ -756,8 +758,6 @@
       </select>
     </div>
   </div>
-
-  <div class="grid-4" id="bs-kpis" style="margin-bottom:20px;"></div>
 
   <div class="three-col-left">
     <div style="align-self:start;">
@@ -2761,7 +2761,7 @@ function renderBS() {
   const data = loadData();
   const cur = data.balances[selVal];
   if (!cur) {
-    document.getElementById('bs-kpis').innerHTML = `<div class="kpi-tile" style="grid-column:1/-1;"><div class="empty-msg">No balance data for ${MONTHS[mon-1]} ${year}. Enter it in Monthly Entry.</div></div>`;
+    document.getElementById('bs-table').innerHTML = `<tr><td colspan="6" class="empty-msg" style="padding:20px;">No balance data for ${MONTHS[mon-1]} ${year}. Enter it in Monthly Entry.</td></tr>`;
     document.getElementById('bs-tbody').innerHTML = '';
     return;
   }
@@ -2794,11 +2794,6 @@ function renderBS() {
   document.getElementById('header-networth').textContent = fmt(totalAssets);
   document.getElementById('header-date').textContent = `as of ${MONTHS[mon-1]} ${year}`;
 
-  document.getElementById('bs-kpis').innerHTML = `
-    <div class="kpi-tile"><div class="kpi-label">Net Worth</div><div class="kpi-value">${fmt(totalAssets)}</div><div class="kpi-sub">${MONTHS[mon-1]} ${year}</div></div>
-    <div class="kpi-tile"><div class="kpi-label">Investments</div><div class="kpi-value">${fmt(totalInvest)}</div><div class="kpi-sub">${fmtPct(totalAssets?totalInvest/totalAssets:0)} of net worth</div></div>
-    <div class="kpi-tile"><div class="kpi-label">Year over Year</div><div class="kpi-value" style="color:${yoyChange===null?'var(--text2)':yoyChange>=0?'var(--accent)':'var(--red)'}">${yoyChange===null?'—':fmtChange(yoyChange)}</div><div class="kpi-sub">vs. ${yoyLabel}</div></div>
-  `;
   document.getElementById('bs-balance-header').textContent = `${MONTHS[mon-1]} ${year}`;
   document.getElementById('bs-sub-prev-val').textContent   = `${MONTHS[prevMon-1]} ${prevYear}`;
   document.getElementById('bs-sub-ys-val').textContent     = ysLabel;
@@ -2957,21 +2952,20 @@ function buildGoalForecastSeries() {
     data.scenarios[0]
   );
   const events = sc ? (sc.events || []) : [];
-  const inp    = sc ? (sc.inputs  || {}) : {};
-  const gn = (id, fb) => { const v = inp[id]; return v != null && v !== '' ? parseFloat(String(v).replace(/[$,]/g, '')) : fb; };
 
-  // Base monthly assumptions (mirrors getFcDefaults units)
-  const grossIncomeMo = gn('fca-income',    89900) / 12;
-  const taxesMo       = gn('fca-taxes',      1522);
-  const tithingMo     = gn('fca-tithing',     765);
-  const s401kMo       = gn('fca-401k',       214.58);
-  const m401kMo       = gn('fca-match401k',  171.66);
-  const rothMo        = gn('fca-roth',       1250);
-  const hsaMo         = gn('fca-hsa',        266.66);
-  const matchHsaMo    = gn('fca-matchhsa',   100);
-  const expensesMo    = gn('fca-expenses',   3000);
-  const investRatePct = 8;
-  const cashRatePct   = 3.3;
+  // Use getFcDefaults() which reads actual computed DOM values — same source as renderForecast
+  const def = getFcDefaults();
+  const grossIncomeMo = def.grossIncomeMo;
+  const taxesMo       = def.taxesMo;
+  const tithingMo     = def.tithingMo;
+  const s401kMo       = def.s401kMo;
+  const m401kMo       = def.m401kMo;
+  const rothMo        = def.rothMo;
+  const hsaMo         = def.hsaMo;
+  const matchHsaMo    = def.matchHsaMo;
+  const expensesMo    = def.expensesMo;
+  const investRatePct = def.investRatePct;
+  const cashRatePct   = def.cashRatePct;
   const investG = Math.pow(1 + investRatePct / 100, 1/12) - 1;
   const cashG   = Math.pow(1 + cashRatePct   / 100, 1/12) - 1;
 
@@ -2981,10 +2975,23 @@ function buildGoalForecastSeries() {
   const latestKey = balKeys[balKeys.length - 1] || getMonthKey(new Date().getFullYear(), new Date().getMonth());
   let [sy, sm] = latestKey.split('-').map(Number);
 
+  // Compute Car #1 target for car2 seeding
+  const _goals = data.goals || getDefaultGoals();
+  const _car1Goal = _goals.find(g => g.id === 'car1') || {};
+  const _car1Target = _car1Goal.target || 30000;
+  const _car1Pool = (_car1Goal.sourceKeys || ['carfund','savings']).reduce((s, k) => {
+    if (k === 'carfund')  return s + (lb.carfund  || 0);
+    if (k === 'savings')  return s + (lb.savings  || 0);
+    if (k === 'efund')    return s + (lb.efund    || 0);
+    return s;
+  }, 0);
+  const _car2Init = Math.max(0, _car1Pool - _car1Target);
+
   let runBal = {
     savings:  lb.savings  || 0,
     efund:    lb.efund    || 0,
     carfund:  lb.carfund  || 0,
+    car2:     _car2Init,
     nateroth: lb.nateroth || 0,
     allyroth: lb.allyroth || 0,
     elevate:  lb.elevate  || 0,
@@ -3044,8 +3051,50 @@ function buildGoalForecastSeries() {
     runBal.voya     = runBal.voya     * (1+investG);
     runBal.hsa      = runBal.hsa      * (1+investG) + proj.hsa + proj.matchHsa;
     runBal.carfund  = runBal.carfund  * (1+cashG);
-    runBal.savings  = runBal.savings  * (1+cashG) + rem;
+    runBal.car2     = runBal.car2     * (1+cashG);
+    runBal.savings  = runBal.savings  * (1+cashG);
     runBal.efund    = runBal.efund    * (1+cashG);
+
+    // Waterfall — same logic as renderForecast
+    const wGoals = (data.goals || getDefaultGoals())
+      .filter(g => g.waterfall && g.waterfallPriority != null)
+      .sort((a, b) => a.waterfallPriority - b.waterfallPriority);
+    const rbGet = k => {
+      if (k === 'carfund') return runBal.carfund;
+      if (k === 'efund')   return runBal.efund;
+      if (k === 'car2')    return runBal.car2;
+      if (k === 'savings') return runBal.savings;
+      return 0;
+    };
+    const rbAdd = (k, amt) => {
+      if (k === 'carfund') runBal.carfund += amt;
+      else if (k === 'efund') runBal.efund += amt;
+      else if (k === 'car2') { runBal.car2 += amt; runBal.savings += amt; } // car2 tracks into savings
+      else runBal.savings += amt;
+    };
+    let surplus = rem;
+    if (surplus >= 0) {
+      for (const g of wGoals) {
+        if (surplus <= 0) break;
+        if (g.deadline && key > g.deadline) continue;
+        const keys = g.sourceKeys && g.sourceKeys.length ? g.sourceKeys : ['savings'];
+        const currentPool = keys.reduce((s, k) => s + rbGet(k), 0);
+        const needed = Math.max(0, g.target - currentPool);
+        if (needed <= 0) continue;
+        const alloc = Math.min(surplus, needed);
+        surplus -= alloc;
+        rbAdd(keys[0], alloc);
+      }
+      if (surplus > 0) runBal.savings += surplus;
+    } else {
+      let deficit = -surplus;
+      for (const k of ['savings', 'efund', 'carfund']) {
+        if (deficit <= 0) break;
+        const drawn = Math.min(deficit, Math.max(0, rbGet(k)));
+        if (drawn > 0) { rbAdd(k, -drawn); deficit -= drawn; }
+      }
+      if (deficit > 0) runBal.savings -= deficit;
+    }
 
     if (proj.savingsSet   !== undefined) runBal.savings = proj.savingsSet;
     if (proj.savingsDelta !== undefined) runBal.savings += proj.savingsDelta;
@@ -3060,9 +3109,15 @@ function buildGoalForecastSeries() {
 }
 
 // Scan the forecast series and return {year, month} of first month the goal's balance hits target, or null.
-function findGoalCompletion(g, series, car1Target) {
-  const investKeys = new Set(['nateroth','allyroth','elevate','voya','hsa','invest']);
+function findGoalCompletion(g, series, car1Target, car1Deadline) {
   for (const pt of series) {
+    // For car2: only look at months AFTER the car1 purchase deadline, using savings+carfund
+    if ((g.sourceKeys || []).includes('car2')) {
+      if (car1Deadline && pt.key <= car1Deadline) continue;
+      const total = (pt.savings || 0) + Math.max(0, pt.carfund || 0);
+      if (total >= g.target) return { year: pt.year, month: pt.month };
+      continue;
+    }
     const total = (g.sourceKeys || []).reduce((sum, k) => {
       if (k === 'efund')    return sum + (pt.efund    || 0);
       if (k === 'savings')  return sum + (pt.savings  || 0);
@@ -3074,7 +3129,6 @@ function findGoalCompletion(g, series, car1Target) {
       if (k === 'voya')     return sum + (pt.voya     || 0);
       if (k === 'hsa')      return sum + (pt.hsa      || 0);
       if (k === 'invest')   return sum + (pt.nateroth||0)+(pt.allyroth||0)+(pt.elevate||0)+(pt.voya||0)+(pt.hsa||0);
-      if (k === 'car2')     return sum + Math.max(0, (pt.carfund||0) - (car1Target||30000));
       return sum;
     }, 0);
     if (total >= g.target) return { year: pt.year, month: pt.month };
@@ -3095,6 +3149,7 @@ function renderGoals(cur, selVal) {
   const carCurrent    = cur.carfund || 0;
   const car1Goal      = goals.find(g => g.id === 'car1') || {};
   const car1Target    = car1Goal.target || 30000;
+  const car1Deadline  = car1Goal.deadline || null;
   const car1Keys      = car1Goal.sourceKeys || ['carfund'];
   const car1Pool      = car1Keys.reduce((sum, k) => {
     if (k === 'carfund')  return sum + (cur.carfund  || 0);
@@ -3159,6 +3214,7 @@ function renderGoals(cur, selVal) {
 
   const waterfallProjections = {};
   let wfYear = selYear, wfMon = selMon;
+  const cashRateMo = Math.pow(1 + 2.0 / 100, 1/12) - 1; // 2% annual cash return
 
   for (const g of waterfallGoals) {
     const current = getCurrentForGoal(g);
@@ -3170,13 +3226,46 @@ function renderGoals(cur, selVal) {
     if (remaining <= 0) { waterfallProjections[g.id] = { complete: true }; continue; }
     if (surplusMo <= 0) { waterfallProjections[g.id] = { noSurplus: true }; continue; }
     const startYr = wfYear, startMon = wfMon;
-    const monthsNeeded = Math.ceil(remaining / surplusMo);
+    // Solve n accounting for growth on existing balance: B*(1+r)^n + C*((1+r)^n-1)/r = T
+    let monthsNeeded;
+    const r = cashRateMo;
+    if (r > 0 && current > 0) {
+      // n = log((T + C/r) / (B + C/r)) / log(1+r)
+      const num = g.target + surplusMo / r;
+      const den = current + surplusMo / r;
+      monthsNeeded = den > 0 ? Math.ceil(Math.log(num / den) / Math.log(1 + r)) : Math.ceil(remaining / surplusMo);
+    } else {
+      monthsNeeded = Math.ceil(remaining / surplusMo);
+    }
     let endMon = wfMon + monthsNeeded;
     let endYr = wfYear;
     while (endMon > 12) { endMon -= 12; endYr++; }
     waterfallProjections[g.id] = { startYr, startMon, endYr, endMon };
     wfYear = endYr; wfMon = endMon;
     if (wfMon > 12) { wfMon -= 12; wfYear++; }
+  }
+
+  // Compute current-month waterfall allocation per goal
+  const waterfallAlloc = {};
+  {
+    const totalSurplus = (() => {
+      try { const pa = getProjAssumptions(); return pa.surplusMo > 0 ? pa.surplusMo : getTrailingAvgSurplus(); }
+      catch(e) { return getTrailingAvgSurplus(); }
+    })();
+    let surplusLeft = totalSurplus;
+    const selKey = selVal;
+    for (const wg of waterfallGoals) {
+      waterfallAlloc[wg.id] = 0;
+      if (surplusLeft <= 0) continue;
+      if (wg.deadline && selKey > wg.deadline) continue;
+      const keys = wg.sourceKeys && wg.sourceKeys.length ? wg.sourceKeys : ['savings'];
+      const poolCurrent = keys.reduce((s, k) => s + getValueForKey(k), 0);
+      const needed = Math.max(0, wg.target - poolCurrent);
+      if (needed <= 0) continue;
+      const alloc = Math.min(surplusLeft, needed);
+      waterfallAlloc[wg.id] = alloc;
+      surplusLeft -= alloc;
+    }
   }
 
   const html = sortedGoals.map((g, idx) => {
@@ -3186,10 +3275,13 @@ function renderGoals(cur, selVal) {
     const remaining = Math.max(0, g.target - current);
     const deadlineParts = g.deadline ? g.deadline.split('-').map(Number) : null;
     const deadlineLabel = deadlineParts ? `${MONTHS[deadlineParts[1]-1]} ${deadlineParts[0]}` : null;
-    const monthlyContrib = getContribForGoal(g);
+    // Saving: for waterfall goals, use this month's allocated share; otherwise use the goal's contrib
+    const monthlyContrib = g.waterfall ? (waterfallAlloc[g.id] || 0) : getContribForGoal(g);
 
-    // Use event-aware forecast series to find projected completion
-    const projCompletion = remaining > 0 ? findGoalCompletion(g, forecastSeries, car1Target) : null;
+    // Projected completion: all goals use the forecast series directly
+    const isInvestGoal = g.contribType === 'invest' ||
+      (g.sourceKeys || []).some(k => ['invest','nateroth','allyroth','elevate','voya','hsa'].includes(k));
+    const projCompletion = remaining > 0 ? findGoalCompletion(g, forecastSeries, car1Target, car1Deadline) : null;
     const projLabel = projCompletion ? `${MONTHS[projCompletion.month-1]} ${projCompletion.year}` : null;
 
     let monthsToDeadline = null;
@@ -3203,9 +3295,9 @@ function renderGoals(cur, selVal) {
         (projCompletion.year === deadlineParts[0] && projCompletion.month <= deadlineParts[1]))
       : null;
 
-    // Fallback needed/mo for display when no projection found
+    // Needed/mo calculation — always show when goal is in progress with a deadline
     let neededPerMonth = null;
-    if (remaining > 0 && monthsToDeadline > 0 && !projCompletion) {
+    if (remaining > 0 && monthsToDeadline > 0) {
       const isInvestGoal = g.contribType === 'invest' ||
         (g.sourceKeys || []).some(k => ['invest','nateroth','allyroth','elevate','voya','hsa'].includes(k));
       if (isInvestGoal) {
@@ -3232,40 +3324,80 @@ function renderGoals(cur, selVal) {
 
     const barColor  = (status === 'complete' || status === 'on-track') ? '#3B6D11' : status === 'behind' ? '#BA7517' : 'var(--border)';
     const pctColor  = (status === 'complete' || status === 'on-track') ? '#3B6D11' : status === 'behind' ? '#BA7517' : 'var(--text3)';
+
+    // Round to nearest dollar, no decimals
+    const fmtR = (n) => n == null || isNaN(n) ? '—' : (n < 0 ? `($${Math.abs(Math.round(n)).toLocaleString('en-US')})` : `$${Math.round(n).toLocaleString('en-US')}`);
+
+    // Status chip (pill) styling
     const pillBg    = (status === 'complete' || status === 'on-track') ? '#EAF3DE' : status === 'behind' ? '#FAEEDA' : 'var(--surface2)';
     const pillColor = (status === 'complete' || status === 'on-track') ? '#27500A' : status === 'behind' ? '#633806' : 'var(--text2)';
     const dotColor  = (status === 'complete' || status === 'on-track') ? '#3B6D11' : status === 'behind' ? '#BA7517' : 'var(--border)';
-    const pillText  = status === 'complete' ? 'Goal reached!'
-      : status === 'on-track' ? `On track · target ${deadlineLabel}`
-      : status === 'behind'   ? `Behind · target ${deadlineLabel}`
-      : 'Deferred · no deadline';
+    const pillShort = status === 'complete' ? 'Goal reached!'
+      : status === 'on-track' ? 'On track'
+      : status === 'behind'   ? 'Behind'
+      : 'Deferred';
 
-    // Projected completion line (only show when still in progress and projection available)
-    const projLine = (remaining > 0 && projLabel)
-      ? `<div style="font-size:11px;color:var(--text3);margin-top:4px;">Projected completion: <strong style="color:var(--text2);">${projLabel}</strong></div>`
-      : '';
+    // Need/Save callout colors
+    const coBg      = status === 'behind' ? '#FAEEDA' : '#EAF3DE';
+    const coBorder  = status === 'behind' ? '#FAC775' : '#C0DD97';
+    const coText    = status === 'behind' ? '#633806' : '#27500A';
 
-    const neededBox = status === 'complete' ? '' : `
-        <div style="background:var(--surface2);border-radius:6px;padding:6px 10px;text-align:right;">
-          <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;color:var(--text3);margin-bottom:2px;">Needed / mo</div>
-          <div style="font-size:13px;font-weight:600;font-family:var(--font-mono);color:var(--text);">${neededPerMonth ? fmt(neededPerMonth) : '—'}</div>
+    // Date-link chip contents
+    const projColor = status === 'behind' ? '#BA7517' : '#27500A';
+    const dateLink = (() => {
+      if (status === 'complete' || !deadlineLabel) return '';
+      if (!projLabel) return `<div style="font-size:11px;padding:3px 9px;border-radius:6px;background:var(--surface2);color:var(--text2);font-family:var(--font-mono);">target <strong style="color:var(--text);font-weight:500;">${deadlineLabel}</strong></div>`;
+      const projDt = projCompletion.year * 12 + projCompletion.month;
+      const tgtDt  = deadlineParts ? deadlineParts[0] * 12 + deadlineParts[1] : Infinity;
+      const projFirst = projDt <= tgtDt;
+      const projStrong = `<strong style="color:${projColor};font-weight:500;">${projLabel}</strong>`;
+      const tgtStrong  = `<strong style="color:var(--text);font-weight:500;">${deadlineLabel}</strong>`;
+      const inner = projFirst
+        ? `Projected ${projStrong} <span style="color:var(--text3);font-size:10px;">→</span> target ${tgtStrong}`
+        : `Target ${tgtStrong} <span style="color:var(--text3);font-size:10px;">→</span> projected ${projStrong}`;
+      return `<div style="font-size:11px;padding:3px 9px;border-radius:6px;background:var(--surface2);color:var(--text2);font-family:var(--font-mono);display:inline-flex;align-items:center;gap:6px;">${inner}</div>`;
+    })();
+
+    // Meta grid: Current | Target | Save/Need callout (empty placeholder when complete to keep alignment)
+    const metaGrid = status === 'complete'
+      ? `<div style="display:grid;grid-template-columns:1fr 1fr 1.4fr;gap:8px;padding-top:8px;border-top:0.5px solid var(--border);">
+          <div style="display:flex;flex-direction:column;gap:2px;padding:4px 0;"><div style="font-size:10px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text3);">Current</div><div style="font-size:13px;font-weight:500;font-family:var(--font-mono);color:var(--text);">${fmtR(current)}</div></div>
+          <div style="display:flex;flex-direction:column;gap:2px;padding:4px 0;"><div style="font-size:10px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text3);">Target</div><div style="font-size:13px;font-weight:500;font-family:var(--font-mono);color:var(--text);">${fmtR(g.target)}</div></div>
+          <div></div>
+        </div>`
+      : `<div style="display:grid;grid-template-columns:1fr 1fr 1.4fr;gap:8px;padding-top:8px;border-top:0.5px solid var(--border);align-items:stretch;">
+          <div style="display:flex;flex-direction:column;gap:2px;padding:4px 0;"><div style="font-size:10px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text3);">Current</div><div style="font-size:13px;font-weight:500;font-family:var(--font-mono);color:var(--text);">${fmtR(current)}</div></div>
+          <div style="display:flex;flex-direction:column;gap:2px;padding:4px 0;"><div style="font-size:10px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text3);">Target</div><div style="font-size:13px;font-weight:500;font-family:var(--font-mono);color:var(--text);">${fmtR(g.target)}</div></div>
+          <div style="background:${coBg};border:0.5px solid ${coBorder};border-radius:6px;padding:4px 10px;display:flex;flex-direction:column;justify-content:center;color:${coText};font-family:var(--font-mono);">
+            <div style="display:flex;justify-content:space-between;align-items:baseline;padding:2px 0;font-size:12px;">
+              <span style="font-size:10px;text-transform:uppercase;letter-spacing:0.05em;opacity:0.75;">Saving</span>
+              <span style="font-size:13px;font-weight:500;">${fmtR(monthlyContrib || 0)}</span>
+            </div>
+            <div style="height:0.5px;background:currentColor;opacity:0.2;margin:1px 0;"></div>
+            <div style="display:flex;justify-content:space-between;align-items:baseline;padding:2px 0;font-size:12px;">
+              <span style="font-size:10px;text-transform:uppercase;letter-spacing:0.05em;opacity:0.75;">Need/mo</span>
+              <span style="font-size:13px;font-weight:500;">${neededPerMonth != null ? fmtR(neededPerMonth) : '—'}</span>
+            </div>
+          </div>
         </div>`;
 
-    return `<div class="goal-item" onclick="openGoalModal(${originalIdx})" style="cursor:pointer;" title="Click to edit">
-      <div class="goal-header">
-        <span class="goal-name">${g.name}</span>
-        <span class="goal-pct" style="color:${pctColor}">${(pct*100).toFixed(1)}%</span>
-      </div>
-      <div class="goal-track"><div class="goal-fill" style="width:${pct*100}%;background:${barColor};"></div></div>
-      <div class="goal-meta"><span>${fmt(current)} of ${fmt(g.target)}</span><span>${remaining > 0 ? fmt(remaining) + ' remaining' : 'Complete'}</span></div>
-      ${projLine}
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;">
-        <div style="display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;padding:3px 9px;border-radius:4px;background:${pillBg};color:${pillColor};">
-          <span style="width:6px;height:6px;border-radius:50%;background:${dotColor};display:inline-block;flex-shrink:0;"></span>
-          ${pillText}
+    // Footer chip rail: status pill + date link
+    const footer = `<div style="display:flex;gap:6px;flex-wrap:wrap;padding-top:8px;border-top:0.5px solid var(--border);">
+        <div style="font-size:11px;padding:3px 9px;border-radius:6px;background:${pillBg};color:${pillColor};display:inline-flex;align-items:center;gap:5px;font-weight:500;">
+          <span style="width:5px;height:5px;border-radius:50%;background:${dotColor};display:inline-block;flex-shrink:0;"></span>
+          ${pillShort}
         </div>
-        ${neededBox}
+        ${dateLink}
+      </div>`;
+
+    return `<div class="goal-item" onclick="openGoalModal(${originalIdx})" style="cursor:pointer;background:var(--surface);border:0.5px solid var(--border);border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:10px;box-shadow:0 1px 2px rgba(0,0,0,0.06), 0 2px 8px rgba(0,0,0,0.04);" title="Click to edit">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;">
+        <span style="font-size:14px;font-weight:500;color:var(--text);">${g.name}</span>
+        <span style="font-size:14px;font-weight:500;font-family:var(--font-mono);color:${pctColor};">${(pct*100).toFixed(1)}%</span>
       </div>
+      <div class="goal-track" style="margin-bottom:0;"><div class="goal-fill" style="width:${pct*100}%;background:${barColor};"></div></div>
+      ${metaGrid}
+      ${footer}
     </div>`;
   }).join('');
 
@@ -4711,6 +4843,7 @@ function renderForecast() {
 
   // In Full Year mode the anchor is redundant — actuals are embedded in fcCols
   const allCols = fcMode === 'fullyear' ? fcCols : [anchorCol, ...fcCols];
+  window._lastForecastCols = fcCols; // cache for goals projected completion
   const n = allCols.length;
 
   // ---- Header ----
@@ -7463,7 +7596,7 @@ function renderReturns() {
   const rangeEl = document.getElementById('ret-range-tabs');
   if (rangeEl) {
     const ranges = [{k:'lastyear',l:'Last Year'},{k:'ytd',l:'YTD'},{k:'max',l:'Max'}];
-    const btnStyle = (k) => `padding:6px 14px;border-radius:6px;font-size:12px;font-weight:${_retRange===k?700:500};cursor:pointer;border:1px solid ${_retRange===k?'var(--text)':'var(--border)'};background:${_retRange===k?'var(--text)':'var(--surface)'};color:${_retRange===k?'var(--bg)':'var(--text2)'};transition:all 0.15s;font-family:var(--font-body);`;
+    const btnStyle = (k) => `padding:6px 14px;border-radius:6px;font-size:12px;font-weight:${_retRange===k?700:500};cursor:pointer;border:1px solid ${_retRange===k?'var(--accent)':'var(--border)'};background:${_retRange===k?'var(--accent)':'var(--surface)'};color:${_retRange===k?'#fff':'var(--text2)'};transition:all 0.15s;font-family:var(--font-body);`;
     const btnHtml = ranges.map(r => `<button onclick="setRetRange('${r.k}')" style="${btnStyle(r.k)}">${r.l}</button>`).join('');
     const monthOpts = (sel) => MONTHS.map((m,i) => `<option value="${i+1}"${sel===i+1?' selected':''}>${m}</option>`).join('');
     const now = new Date();
