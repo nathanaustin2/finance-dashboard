@@ -3025,7 +3025,7 @@ function buildGoalForecastSeries() {
     for (const ev of events) {
       if (ev.month !== key) continue;
       switch (ev.category) {
-        case 'income':            proj.grossIncome = ev.amount; break;
+        case 'income':            proj.grossIncome = ev.amount / 12; break;
         case 'taxes':             proj.taxes       = ev.amount; break;
         case 'tithing':           proj.tithing     = ev.amount; break;
         case 'expenses':          proj.expenses    = ev.amount; break;
@@ -4492,7 +4492,7 @@ function applyEvents(monthKey, proj) {
   for (const ev of events) {
     switch (ev.category) {
       // IS-line items — always set to the specified value
-      case 'income':            proj.grossIncome = ev.amount; break;
+      case 'income':            proj.grossIncome = ev.amount / 12; break;
       case 'taxes':             proj.taxes       = ev.amount; break;
       case 'tithing':           proj.tithing     = ev.amount; break;
       case 'savings_401k':      proj.s401k       = ev.amount; break;
