@@ -2649,7 +2649,7 @@ function renderIS() {
         }
         if (t.type === 'Savings' && t.category === 'Personal Contribution' && t.subcategory === '401k')
           c.k401 += parseFloat(t.amount) || 0;
-        if (t.type === 'Savings' && t.subcategory === 'HSA') {
+        if (t.type === 'Savings' && t.category === 'Personal Contribution' && t.subcategory === 'HSA') {
           const amt = parseFloat(t.amount) || 0;
           if (amt > 0) c.hsa += amt;
         }
@@ -2703,26 +2703,35 @@ function renderIS() {
     const lim = LIMITS[yr] || LIMITS[2026];
     const isCurrentYear = yr === latestYear;
     const thruLabel = isCurrentYear ? ` thru ${MONTHS[latestMonth-1]}` : '';
-    const bar = (val, max, color) => {
+    // Expected pace: for current year, pro-rated by month; for past years, full limit
+    const paceMonth = isCurrentYear ? latestMonth : 12;
+    // paceVal rounds to whole dollars so rounding noise doesn't flip the bar to red
+    const bar = (val, max, paceVal) => {
       const pct = Math.min(val / max, 1) * 100;
-      const barColor = val >= max ? 'var(--accent)' : color;
+      const expected = (paceMonth / 12) * max;
+      const barColor = paceVal >= max ? 'var(--accent)'
+        : paceVal >= expected ? 'var(--gold)'
+        : 'var(--red)';
       return `<div style="height:7px;border-radius:4px;background:var(--surface2);overflow:hidden;margin-bottom:2px;"><div style="height:100%;border-radius:4px;background:${barColor};width:${pct.toFixed(1)}%;transition:width 0.5s;"></div></div>`;
     };
-    const rowFn = (label, val, max, color) => `
+    const rowFn = (label, val, max) => {
+      const paceVal = Math.round(val);
+      return `
       <div style="margin-bottom:10px;">
         <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:3px;">
           <span style="font-size:11px;color:var(--text2);">${label}</span>
-          <span style="font-size:11px;font-family:var(--font-mono);color:${val>=max?'var(--accent)':'var(--text2)'};">${fmt(val)} <span style="color:var(--text3);">/ ${fmt(max)}</span></span>
+          <span style="font-size:11px;font-family:var(--font-mono);color:${paceVal>=max?'var(--accent)':'var(--text2)'};">${fmt(val)} <span style="color:var(--text3);">/ ${fmt(max)}</span></span>
         </div>
-        ${bar(val, max, color)}
+        ${bar(val, max, paceVal)}
       </div>`;
+    };
     return `
       <div style="flex:1;min-width:0;">
         <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--text3);margin-bottom:10px;">${yr}${thruLabel}</div>
-        ${rowFn("Nate's Roth IRA", c.rothNate, lim.rothNate, 'var(--gold)')}
-        ${rowFn("Ally's Roth IRA", c.rothAlly, lim.rothAlly, 'var(--gold)')}
-        ${rowFn('401(k)', c.k401, lim.k401, 'var(--blue)')}
-        ${rowFn('HSA (incl. match)', c.hsa, lim.hsa, 'var(--blue)')}
+        ${rowFn("Nate's Roth IRA", c.rothNate, lim.rothNate)}
+        ${rowFn("Ally's Roth IRA", c.rothAlly, lim.rothAlly)}
+        ${rowFn('401(k)', c.k401, lim.k401)}
+        ${rowFn('HSA (incl. match)', c.hsa, lim.hsa)}
       </div>`;
   };
   srEl.innerHTML = `<div style="display:flex;gap:16px;">${yearsInRange.map(renderYearContrib).join('<div style="width:1px;background:var(--border);flex-shrink:0;"></div>')}</div>`;
@@ -4591,14 +4600,16 @@ function renderForecast() {
     remaining: anchorIncomeForLiving - anchorExpenses,
     savings:  lb.savings  || 10209.30,
     efund:    lb.efund    || 7500,
+    checking: lb.checking || 2631.62,
     nateroth: lb.nateroth || 34301.12,
     allyroth: lb.allyroth || 1669.87,
     elevate:  lb.elevate  || 8257.57,
     hsa:      lb.hsa      || 4411.02,
   };
   anchorCol.netWorth = anchorCol.nateroth + anchorCol.allyroth + anchorCol.elevate +
-    (lb.voya||3653.37) + anchorCol.hsa + anchorCol.savings + anchorCol.efund + (lb.carfund||23000);
+    (lb.voya||3653.37) + anchorCol.hsa + anchorCol.savings + anchorCol.efund + anchorCol.checking;
   anchorCol.carfund = lb.carfund || 23000;
+  anchorCol.voya    = lb.voya || 3653.37;
 
   // ---- Build column definitions based on mode ----
   const fcDefs = [];
@@ -4639,6 +4650,7 @@ function renderForecast() {
     runBal = {
       savings:  priorBal.savings  || anchorCol.savings,
       efund:    priorBal.efund    || anchorCol.efund,
+      checking: priorBal.checking || anchorCol.checking,
       nateroth: priorBal.nateroth || anchorCol.nateroth,
       allyroth: priorBal.allyroth || anchorCol.allyroth,
       elevate:  priorBal.elevate  || anchorCol.elevate,
@@ -4650,6 +4662,7 @@ function renderForecast() {
     // forward12 and custom both start projecting from the latest actual balances
     runBal = {
       savings:  anchorCol.savings, efund: anchorCol.efund,
+      checking: anchorCol.checking,
       nateroth: anchorCol.nateroth, allyroth: anchorCol.allyroth,
       elevate:  anchorCol.elevate, voya: lb.voya||3653.37,
       hsa:      anchorCol.hsa, carfund: lb.carfund||23000,
@@ -4709,6 +4722,7 @@ function renderForecast() {
         if (balSnap) {
           runBal.savings  = balSnap.savings  ?? runBal.savings;
           runBal.efund    = balSnap.efund    ?? runBal.efund;
+          runBal.checking = balSnap.checking ?? runBal.checking;
           runBal.nateroth = balSnap.nateroth ?? runBal.nateroth;
           runBal.allyroth = balSnap.allyroth ?? runBal.allyroth;
           runBal.elevate  = balSnap.elevate  ?? runBal.elevate;
@@ -4717,14 +4731,14 @@ function renderForecast() {
           runBal.carfund  = balSnap.carfund  ?? runBal.carfund;
         }
         const nw2 = runBal.nateroth + runBal.allyroth + runBal.elevate +
-                    runBal.voya + runBal.hsa + runBal.savings + runBal.efund + runBal.carfund;
+                    runBal.voya + runBal.hsa + runBal.savings + runBal.efund + runBal.carfund + runBal.checking;
         return {
           key, year, month, isPrior: true, isActual: true, isFuture: false,
           hasEvents: false,
           grossIncome: ah2.grossIncome, taxes: ah2.taxes, netIncome: ni2,
           tithing: ah2.tithing, personalSavings: ps2, matchSavings: ms2, totalSavings: ps2+ms2,
           incomeForLiving: ifl2, expenses: exp2, remaining: rem2,
-          savings: runBal.savings, efund: runBal.efund,
+          savings: runBal.savings, efund: runBal.efund, checking: runBal.checking,
           nateroth: runBal.nateroth, allyroth: runBal.allyroth,
           elevate: runBal.elevate, voya: runBal.voya, hsa: runBal.hsa, carfund: runBal.carfund, netWorth: nw2,
         };
@@ -4828,14 +4842,14 @@ function renderForecast() {
     if (proj.carfundDelta !== undefined) runBal.carfund  = runBal.carfund  + proj.carfundDelta;
 
     const nw = runBal.nateroth + runBal.allyroth + runBal.elevate +
-               runBal.voya + runBal.hsa + runBal.savings + runBal.efund + runBal.carfund;
+               runBal.voya + runBal.hsa + runBal.savings + runBal.efund + runBal.carfund + runBal.checking;
     return {
       key, year, month, isPrior: false, isActual: false, isFuture: true,
       hasEvents: hasEventsForMonth(key),
       grossIncome: proj.grossIncome, taxes: proj.taxes, netIncome: ni,
       tithing: proj.tithing, personalSavings: ps, matchSavings: ms, totalSavings: ps+ms,
       incomeForLiving: ifl, expenses: proj.expenses, remaining: rem,
-      savings: runBal.savings, efund: runBal.efund,
+      savings: runBal.savings, efund: runBal.efund, checking: runBal.checking,
       nateroth: runBal.nateroth, allyroth: runBal.allyroth,
       elevate: runBal.elevate, voya: runBal.voya, hsa: runBal.hsa, carfund: runBal.carfund, netWorth: nw,
     };
@@ -4931,44 +4945,63 @@ function renderForecast() {
   const pb = prevKey2 ? data.balances[prevKey2] : {};
 
   const mkPrev = (field, fallback) => [pb[field]||fallback, ...allCols.slice(0,-1).map(c=>c[field])];
+  const prevCk = mkPrev('checking', 2631.62);
   const prevE  = mkPrev('efund',    7500);
+  const prevS  = mkPrev('savings',  10209.30);
+  const prevCF = mkPrev('carfund',  23000);
   const prevNR = mkPrev('nateroth', 33940.69);
   const prevAR = mkPrev('allyroth', 1050.61);
   const prevEL = mkPrev('elevate',  7472.43);
   const prevH  = mkPrev('hsa',      4095.89);
-  // Combined savings + car fund prev array
-  const prevSC = [(pb.savings||10160.53) + (pb.carfund||23000),
-                  ...allCols.slice(0,-1).map(c => c.savings + c.carfund)];
+  const prevVY = mkPrev('voya',     3653.37);
+
+  // Total Cash and Total Investments prev arrays
+  const prevTC = allCols.map((_, i) => (i === 0 ? (pb.checking||2631.62)+(pb.efund||7500)+(pb.savings||10209.30)+(pb.carfund||23000)
+    : allCols[i-1].checking + allCols[i-1].efund + allCols[i-1].savings + allCols[i-1].carfund));
+  const prevTI = allCols.map((_, i) => (i === 0 ? (pb.nateroth||33940.69)+(pb.allyroth||1050.61)+(pb.hsa||4095.89)+(pb.elevate||7472.43)+(pb.voya||3653.37)
+    : allCols[i-1].nateroth + allCols[i-1].allyroth + allCols[i-1].hsa + allCols[i-1].elevate + allCols[i-1].voya));
   const prevNW = [null, ...allCols.slice(0,-1).map(c=>c.netWorth)];
 
   const balRow = (lbl, fn, prevArr) => rows.push(
-    `<tr><td class="row-label">${lbl}</td>${allCols.map((c,i)=>vcBal(fn(c),c,prevArr[i])).join('')}</tr>`
+    `<tr><td class="row-label indent">${lbl}</td>${allCols.map((c,i)=>vcBal(fn(c),c,prevArr[i])).join('')}</tr>`
   );
-  const nwRow = (lbl, fn, prevArr) => rows.push(
-    `<tr class="subtotal"><td class="row-label" style="font-weight:700;">${lbl}</td>${allCols.map((c,i)=>{
+  const subRow2 = (lbl, fn, prevArr) => rows.push(
+    `<tr class="subtotal"><td class="row-label" style="font-weight:600;">${lbl}</td>${allCols.map((c,i)=>{
       const v=fn(c), prev=prevArr[i];
       const s = c.isPrior ? priorBg : '';
       const delta = prev!==null ? v-prev : null;
       const dStr = delta!==null && Math.abs(delta)>0.5
         ? `<div style="font-size:9px;font-family:var(--font-mono);color:${delta>=0?'var(--accent)':'var(--red)'};">${delta>=0?'+':''}${fmt(delta)}</div>`
         : '';
-      return `<td style="font-weight:600;font-family:var(--font-mono);font-size:12px;${s}"><div>${fmt(v)}</div>${dStr}</td>`;
+      return `<td style="font-weight:600;font-family:var(--font-mono);font-size:11px;${s}"><div>${fmt(v)}</div>${dStr}</td>`;
+    }).join('')}</tr>`
+  );
+  const totRowBal = (lbl, fn, prevArr) => rows.push(
+    `<tr class="total-row"><td class="row-label">${lbl}</td>${allCols.map((c,i)=>{
+      const v=fn(c), prev=prevArr[i];
+      const delta = prev!==null ? v-prev : null;
+      const dStr = delta!==null && Math.abs(delta)>0.5
+        ? `<div style="font-size:9px;font-family:var(--font-mono);opacity:0.8;">${delta>=0?'+':''}${fmt(delta)}</div>`
+        : '';
+      return `<td><div style="font-family:var(--font-mono);font-size:12px;">${fmt(v)}</div>${dStr}</td>`;
     }).join('')}</tr>`
   );
 
-  const prevVY = mkPrev('voya', 3653.37);
-
   sect('CASH');
-  balRow('Emergency Fund',         c=>c.efund,                 prevE);
-  balRow('Savings + Car Fund',     c=>c.savings + c.carfund,   prevSC);
+  balRow('Checking',       c=>c.checking, prevCk);
+  balRow('Emergency Fund', c=>c.efund,    prevE);
+  balRow('Savings',        c=>c.savings + c.carfund, allCols.map((_, i) => (i === 0 ? (pb.savings||10209.30)+(pb.carfund||23000) : allCols[i-1].savings + allCols[i-1].carfund)));
+  subRow2('Total Cash',    c=>c.checking+c.efund+c.savings+c.carfund, prevTC);
 
   sect('INVESTMENTS');
-  balRow("Nate's Roth IRA",        c=>c.nateroth,              prevNR);
-  balRow("Ally's Roth IRA",        c=>c.allyroth,              prevAR);
-  balRow('Lively HSA',             c=>c.hsa,                   prevH);
-  balRow('Elevate 401(k)',         c=>c.elevate,               prevEL);
-  balRow('Voya 401(k)',            c=>c.voya,                  prevVY);
-  nwRow('Net Worth',               c=>c.netWorth,              prevNW);
+  balRow("Nate's Roth IRA",      c=>c.nateroth, prevNR);
+  balRow("Ally's Roth IRA",      c=>c.allyroth, prevAR);
+  balRow('Lively HSA',           c=>c.hsa,      prevH);
+  balRow('Elevate 401(k)',       c=>c.elevate,  prevEL);
+  balRow('Voya 401(k)',          c=>c.voya,     prevVY);
+  subRow2('Total Investments',   c=>c.nateroth+c.allyroth+c.hsa+c.elevate+c.voya, prevTI);
+
+  totRowBal('Net Worth',  c=>c.netWorth, prevNW);
 
   document.getElementById('fc-tbody').innerHTML = rows.join('');
 }
