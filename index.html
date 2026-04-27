@@ -329,7 +329,7 @@
 
   .is-preset { font-size: 12px; padding: 6px 12px; }
   .is-preset.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
-  .is-monthly-table { min-width: 100%; }
+  .is-monthly-table { min-width: 100%; table-layout: fixed; }
   .is-monthly-table th {
     font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em;
     color: var(--text3); padding: 10px 14px; border-bottom: 2px solid var(--border);
@@ -2511,6 +2511,11 @@ function sumMonths(months) {
   return t;
 }
 
+function toggleIsAggMode() {
+  window._isAggMode = window._isAggMode === 'avg' ? 'total' : 'avg';
+  renderIS();
+}
+
 function renderIS() {
   const fromMonth = parseInt(document.getElementById('is-from-month').value);
   const fromYear  = parseInt(document.getElementById('is-from-year').value);
@@ -2551,6 +2556,13 @@ function renderIS() {
 
   const showTotal = numMonths > 1;
   const numDataCols = numMonths + (showTotal ? 1 : 0);
+  // Aggregator state — total (default) or monthly average for the selected period
+  const isAvgMode = window._isAggMode === 'avg';
+  const aggLabel = isAvgMode ? 'Average' : 'Total';
+  const agg = (vals) => {
+    const sum = vals.reduce((a, b) => a + b, 0);
+    return isAvgMode && vals.length > 0 ? sum / vals.length : sum;
+  };
   const isData = loadData();
   // Build footnote index — only months in this range that have notes
   const footnotes = [];
@@ -2570,10 +2582,25 @@ function renderIS() {
     return `${MONTHS[p.month-1]}${sup}<br><span style="font-size:9px;font-weight:400;opacity:0.7;">${p.year}</span>`;
   };
 
+  // With table-layout: fixed, only the <th> widths matter. Use explicit pixel widths so the
+  // "Total" / "Average" toggle doesn't reflow the rest of the table.
+  const monthColWidth = numMonths <= 6 ? 110 : (numMonths <= 12 ? 95 : 80);
+  const aggHeaderHtml = showTotal
+    ? `<th class="total-col" style="width:95px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;">
+          <span onclick="toggleIsAggMode()" title="Toggle total / average" style="display:inline-flex;align-items:center;cursor:pointer;flex-shrink:0;">
+            <span style="width:24px;height:14px;border-radius:7px;background:${isAvgMode ? 'var(--accent)' : 'var(--surface2)'};border:1px solid ${isAvgMode ? 'var(--accent)' : 'var(--border)'};position:relative;display:inline-block;flex-shrink:0;">
+              <span style="width:10px;height:10px;border-radius:50%;background:white;position:absolute;top:1px;left:${isAvgMode ? '11px' : '1px'};"></span>
+            </span>
+          </span>
+          <span>${aggLabel}</span>
+        </div>
+      </th>`
+    : '';
   const thead = `<tr>
-    <th class="row-label">Category</th>
-    ${periods.map(p => `<th>${colLabel(p)}</th>`).join('')}
-    ${showTotal ? `<th class="total-col">Total</th>` : ''}
+    <th class="row-label" style="width:200px;">Category</th>
+    ${periods.map(p => `<th style="width:${monthColWidth}px;">${colLabel(p)}</th>`).join('')}
+    ${aggHeaderHtml}
   </tr>`;
   document.getElementById('is-thead').innerHTML = thead;
 
@@ -2586,32 +2613,32 @@ function renderIS() {
   const sect = (label) => rows.push(`<tr class="section-header"><td class="row-label">${label}</td>${Array(numDataCols).fill('<td></td>').join('')}</tr>`);
   const row = (label, getter, indent='', labelSuffix='') => {
     const vals = monthData.map(d => getter(d));
-    const tot = vals.reduce((a,b)=>a+b, 0);
+    const tot = agg(vals);
     rows.push(`<tr><td class="row-label ${indent}">${label}${labelSuffix}</td>${vals.map(v=>vc(v)).join('')}${showTotal ? vc(tot, true) : ''}</tr>`);
   };
   const savingsGroupRow = (label, getter) => {
     const vals = monthData.map(d => getter(d));
-    const tot = vals.reduce((a,b)=>a+b, 0);
+    const tot = agg(vals);
     rows.push(`<tr class="savings-group-row"><td class="row-label savings-group-label">${label}</td>${vals.map(v=>vc(v)).join('')}${showTotal ? vc(tot, true) : ''}</tr>`);
   };
   const expenseCategoryRow = (label, getter) => {
     const vals = monthData.map(d => getter(d));
-    const tot = vals.reduce((a,b)=>a+b, 0);
+    const tot = agg(vals);
     rows.push(`<tr class="expense-cat-row"><td class="row-label">${label}</td>${vals.map(v=>vc(v)).join('')}${showTotal ? vc(tot, true) : ''}</tr>`);
   };
   const subtotalRow = (label, getter) => {
     const vals = monthData.map(d => getter(d));
-    const tot = vals.reduce((a,b)=>a+b, 0);
+    const tot = agg(vals);
     rows.push(`<tr class="subtotal"><td class="row-label">${label}</td>${vals.map(v=>vc(v)).join('')}${showTotal ? vc(tot, true) : ''}</tr>`);
   };
   const keyRow = (label, getter) => {
     const vals = monthData.map(d => getter(d));
-    const tot = vals.reduce((a,b)=>a+b, 0);
+    const tot = agg(vals);
     rows.push(`<tr class="is-key-row"><td class="row-label"><strong>${label}</strong></td>${vals.map(v=>vcKey(v)).join('')}${showTotal ? vcKey(tot, true) : ''}</tr>`);
   };
   const totalRow = (label, getter) => {
     const vals = monthData.map(d => getter(d));
-    const tot = vals.reduce((a,b)=>a+b, 0);
+    const tot = agg(vals);
     rows.push(`<tr class="total-row"><td class="row-label">${label}</td>${vals.map(v=>vcKey(v)).join('')}${showTotal ? vcKey(tot, true) : ''}</tr>`);
   };
   const spacer = () => rows.push(`<tr><td colspan="${numDataCols+1}" style="height:4px;background:var(--surface2);"></td></tr>`);
