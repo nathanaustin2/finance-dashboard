@@ -792,7 +792,10 @@
       </div>
     </div>
     <div class="card" style="align-self:stretch;">
-      <div class="card-title">Goals</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
+        <div class="card-title" style="margin-bottom:0;">Goals</div>
+        <span id="bs-goals-scenario-pill" style="font-size:10px;padding:3px 9px;border-radius:6px;background:var(--accent-bg);color:var(--accent);font-weight:500;text-transform:uppercase;letter-spacing:0.04em;"></span>
+      </div>
       <div id="bs-goals"></div>
     </div>
   </div>
@@ -802,10 +805,15 @@
 <!-- ==================== PROJECTIONS ==================== -->
 <div class="page" id="page-projections">
 
-  <!-- Folder sub-tab bar -->
+  <!-- Folder sub-tab bar — scenario tabs sit on the right above the divider line -->
   <div class="proj-folder-bar">
     <button class="proj-folder-tab active" id="pft-balances"     onclick="switchProjTab('balances')">Cash Flow</button>
     <button class="proj-folder-tab"        id="pft-investments"  onclick="switchProjTab('investments')">Investments</button>
+    <div style="flex:1;"></div>
+    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding-bottom:6px;">
+      <div id="proj-scenario-tabs" style="display:flex;gap:4px;flex-wrap:wrap;"></div>
+      <button class="btn btn-secondary" style="font-size:12px;padding:5px 10px;white-space:nowrap;" onclick="addScenario()">+ Add Scenario</button>
+    </div>
   </div>
 
   <!-- ── Account Balances sub-tab ── -->
@@ -841,10 +849,6 @@
             <option value="2028">2028</option><option value="2029">2029</option><option value="2030">2030</option>
           </select>
         </div>
-      </div>
-      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
-        <div id="forecast-scenario-tabs" style="display:flex;gap:4px;flex-wrap:wrap;"></div>
-        <button class="btn btn-secondary" style="font-size:12px;padding:5px 10px;white-space:nowrap;" onclick="addScenario()">+ Add Scenario</button>
       </div>
     </div>
     <div></div><!-- empty sidebar cell for controls row -->
@@ -969,7 +973,10 @@
 
       <!-- Chart card -->
       <div class="card" style="padding:20px;">
-        <div style="font-family:var(--font-display);font-size:15px;font-weight:700;margin-bottom:4px;">Investment Portfolio Growth</div>
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:4px;">
+          <div style="font-family:var(--font-display);font-size:15px;font-weight:700;">Investment Portfolio Growth</div>
+          <span id="inv-chart-scenario-pill" style="font-size:10px;padding:3px 9px;border-radius:6px;background:var(--accent-bg);color:var(--accent);font-weight:500;text-transform:uppercase;letter-spacing:0.04em;flex-shrink:0;"></span>
+        </div>
         <div style="font-size:12px;color:var(--text2);margin-bottom:20px;" id="inv-chart-sub"></div>
         <div id="inv-chart-container" style="position:relative;"></div>
       </div>
@@ -995,7 +1002,7 @@
           <input type="text" id="inv-mo-contrib" value="" style="width:100%;color:var(--text3);background:var(--surface2);transition:background 0.15s,color 0.15s;"
             onfocus="invInputFocus(this);this.style.background='var(--surface)';this.style.color='var(--text)';"
             onblur="invInputBlur(this);this.style.background='var(--surface2)';this.style.color='var(--text3)';"
-            oninput="invClearSub('inv-mo-contrib-sub','inv-mo-contrib-revert');renderInvestments()">
+            oninput="this.dataset.userOverride='1';invClearSub('inv-mo-contrib-sub','inv-mo-contrib-revert');renderInvestments()">
           <div style="margin-top:3px;min-height:18px;">
             <span id="inv-mo-contrib-sub" style="font-size:11px;color:var(--text3);">From Current Situation scenario</span>
             <button id="inv-mo-contrib-revert" onclick="invRevertContrib()" style="display:none;font-size:11px;color:var(--accent);background:none;border:none;cursor:pointer;padding:0;font-family:var(--font-body);">↩ Reset to default</button>
@@ -2081,26 +2088,52 @@ function invRevertStart() {
 
 function invRevertContrib() {
   const el = document.getElementById('inv-mo-contrib');
-  if (el) el.value = '$' + Math.round(getScenarioMonthlyContribs()).toLocaleString();
+  if (el) {
+    el.value = '$' + Math.round(getScenarioMonthlyContribs()).toLocaleString();
+    el.dataset.userOverride = '0';
+  }
   const sub = document.getElementById('inv-mo-contrib-sub');
   const btn = document.getElementById('inv-mo-contrib-revert');
-  if (sub) { sub.textContent = 'From Current Situation scenario'; sub.style.display = 'inline'; }
+  const data = loadData();
+  const sc = (data.scenarios || []).find(s => s.id === activeScenarioId);
+  if (sub) {
+    const scName = sc ? sc.name : 'scenario';
+    const hasPhases = sc && Array.isArray(sc.phases) && sc.phases.length > 0;
+    sub.textContent = hasPhases ? `From ${scName} (phases applied)` : `From ${scName}`;
+    sub.style.display = 'inline';
+  }
   if (btn) btn.style.display = 'none';
   renderInvestments();
 }
 
 function getScenarioMonthlyContribs() {
-  // Read savings inputs from the first (Current Situation) scenario stored in localStorage.
-  // Falls back to fca-* hidden DOM fields if scenario data is absent, then to defaults.
+  // Compute total monthly investment contributions (Roth + 401k + 401k match + HSA + HSA match)
+  // for the *currently-active scenario's base inputs*. This is used as the simple flat-line
+  // default for the investment projection input field.
   const data = loadData();
-  const sc = data.scenarios && data.scenarios[0];
-  const inp = sc ? sc.inputs : {};
-  const g = (id, def) => parseFloat(inp[id] || document.getElementById(id)?.value || def) || def;
-  return g('fca-401k', 214.58)
-       + g('fca-match401k', 171.66)
-       + g('fca-roth', 1250)
-       + g('fca-hsa', 266.66)
-       + g('fca-matchhsa', 100);
+  const sc = data.scenarios && (
+    data.scenarios.find(s => s.id === (data.activeScenarioId || activeScenarioId)) ||
+    data.scenarios[0]
+  );
+  if (!sc) return 2628.90; // safe baseline
+  const seeds = computeSeedsFromInputs(sc.inputs);
+  return seeds.s401kMo + seeds.m401kMo + seeds.rothMo + seeds.hsaMo + seeds.matchHsaMo;
+}
+
+// Computes investment-only monthly contributions for a given month using the active scenario's
+// phases. Outside the scenario's defined horizon, holds the last phase's contribution constant.
+function getScenarioContribForMonth(monthKey) {
+  const data = loadData();
+  const sc = data.scenarios && (
+    data.scenarios.find(s => s.id === (data.activeScenarioId || activeScenarioId)) ||
+    data.scenarios[0]
+  );
+  if (!sc) return 2628.90;
+  const inputs = (typeof getPhaseInputsForMonth === 'function')
+    ? getPhaseInputsForMonth(sc, monthKey)
+    : sc.inputs;
+  const seeds = computeSeedsFromInputs(inputs);
+  return seeds.s401kMo + seeds.m401kMo + seeds.rothMo + seeds.hsaMo + seeds.matchHsaMo;
 }
 
 function renderInvestments() {
@@ -2129,15 +2162,36 @@ function renderInvestments() {
     }
   }
 
-  // Auto-populate monthly contributions from Current Situation scenario on first render
-  if (!contribEl.value) {
+  // Determine if user has manually overridden the monthly contribution input.
+  // We consider it overridden if the field was explicitly edited (we track this via a data-* flag).
+  // On initial render, leave blank → use phase-aware projection.
+  const hasUserOverride = contribEl.dataset.userOverride === '1';
+
+  // Auto-populate display value from active scenario base contribs if not overridden
+  if (!contribEl.value || !hasUserOverride) {
     contribEl.value = '$' + Math.round(getScenarioMonthlyContribs()).toLocaleString();
+    contribEl.dataset.userOverride = '0';
     const subEl = document.getElementById('inv-mo-contrib-sub');
-    if (subEl) { subEl.textContent = 'From Current Situation scenario'; subEl.style.display = 'inline'; }
+    const sc = (loadData().scenarios || []).find(s => s.id === activeScenarioId);
+    if (subEl) {
+      const scName = sc ? sc.name : 'scenario';
+      const hasPhases = sc && Array.isArray(sc.phases) && sc.phases.length > 0;
+      subEl.textContent = hasPhases
+        ? `From ${scName} (phases applied)`
+        : `From ${scName}`;
+      subEl.style.display = 'inline';
+    }
+  }
+
+  // Update scenario pill on the chart card
+  const pillEl = document.getElementById('inv-chart-scenario-pill');
+  if (pillEl) {
+    const sc = (loadData().scenarios || []).find(s => s.id === activeScenarioId);
+    pillEl.textContent = sc ? sc.name : '';
   }
 
   const startBal    = invParseInput(startEl);
-  const moContrib   = invParseInput(contribEl);
+  const moContribOverride = invParseInput(contribEl);
   const annualRate  = parseFloat(retEl.value)      || 8.0;
   const years       = Math.max(1, parseInt(yearsEl.value) || 38);
   const monthlyRate = Math.pow(1 + annualRate / 100, 1/12) - 1;
@@ -2153,12 +2207,24 @@ function renderInvestments() {
   const yearsSubEl = document.getElementById('inv-years-sub');
   if (yearsSubEl) yearsSubEl.textContent = `Ages ${nateAgeEnd} / ${allyAgeEnd}`;
 
-  // Build yearly data — compound growth + monthly contributions
+  // Build monthly series. If user overrode contributions, use that flat value; else
+  // pull contributions from the active scenario month-by-month (phase-aware), holding
+  // the last phase's value constant beyond any defined phases.
+  const today = new Date();
+  const startMonthIdx = today.getMonth(); // 0-indexed
   const pts = [];
   let val = startBal, cumContrib = 0;
   pts.push({ year: CURRENT_YEAR, nateAge: CURRENT_YEAR - NATE_BIRTH, value: val, cumContrib: 0 });
   for (let y = 1; y <= years; y++) {
     for (let m = 0; m < 12; m++) {
+      const monthsFromNow = (y - 1) * 12 + m;
+      const targetDate = new Date(today.getFullYear(), startMonthIdx + monthsFromNow, 1);
+      const yr = targetDate.getFullYear();
+      const mo = targetDate.getMonth() + 1;
+      const monthKey = `${yr}-${String(mo).padStart(2,'0')}`;
+      const moContrib = hasUserOverride
+        ? moContribOverride
+        : getScenarioContribForMonth(monthKey);
       val = val * (1 + monthlyRate) + moContrib;
       cumContrib += moContrib;
     }
@@ -2177,12 +2243,21 @@ function renderInvestments() {
          : s+'$'+Math.round(a);
   };
 
+  // Average monthly contribution over the projection (or the override if user typed one)
+  const totalMonths = years * 12;
+  const avgMoContrib = hasUserOverride
+    ? moContribOverride
+    : (totalMonths > 0 ? lastPt.cumContrib / totalMonths : 0);
+  const contribLabel = hasUserOverride
+    ? `$${Math.round(moContribOverride).toLocaleString()}/mo contributions`
+    : `~$${Math.round(avgMoContrib).toLocaleString()}/mo avg contributions`;
+
   document.getElementById('inv-stat-value').textContent       = '$' + Math.round(lastPt.value).toLocaleString();
   document.getElementById('inv-stat-income').textContent      = '$' + Math.round(lastPt.value * 0.04).toLocaleString();
   document.getElementById('inv-stat-gain').textContent        = '$' + Math.round(gain).toLocaleString();
   document.getElementById('inv-stat-gain-pct').textContent    = '+'+gainPct.toFixed(1)+'% return on capital deployed';
   document.getElementById('inv-chart-sub').textContent        =
-    `${CURRENT_YEAR}–${endYear} · ${years}-year projection at ${annualRate}% annual return · $${Math.round(moContrib).toLocaleString()}/mo contributions`;
+    `${CURRENT_YEAR}–${endYear} · ${years}-year projection at ${annualRate}% annual return · ${contribLabel}`;
 
   invDrawChart(pts, startBal);
 }
@@ -3024,10 +3099,9 @@ function getTrailingAvgSurplus() {
 // Returns an array of { key, year, month, savings, efund, carfund, nateroth, allyroth, elevate, voya, hsa }
 function buildGoalForecastSeries() {
   const data = loadData();
-  // Find the Current Situation scenario by name, fall back to first scenario
+  // Use the currently-active scenario so goals reflect whatever the user has selected
   const sc   = data.scenarios && (
-    data.scenarios.find(s => s.name === 'Current Situation') ||
-    data.scenarios.find(s => s.name === 'Scenario A') ||
+    data.scenarios.find(s => s.id === (data.activeScenarioId || activeScenarioId)) ||
     data.scenarios[0]
   );
   const events = sc ? (sc.events || []) : [];
@@ -3212,11 +3286,61 @@ function findGoalCompletion(g, series, car1Target, car1Deadline) {
   return null;
 }
 
+// Helper: get the value of a goal's tracked pool at a given series point (or current cur object).
+function getGoalPoolValue(keys, src) {
+  return (keys || []).reduce((sum, k) => {
+    if (k === 'savings')  return sum + (src.savings  || 0);
+    if (k === 'efund')    return sum + (src.efund    || 0);
+    if (k === 'carfund')  return sum + (src.carfund  || 0);
+    if (k === 'checking') return sum + Math.max(0, src.checking || 0);
+    if (k === 'nateroth') return sum + (src.nateroth || 0);
+    if (k === 'allyroth') return sum + (src.allyroth || 0);
+    if (k === 'elevate')  return sum + (src.elevate  || 0);
+    if (k === 'voya')     return sum + (src.voya     || 0);
+    if (k === 'hsa')      return sum + (src.hsa      || 0);
+    if (k === 'invest')   return sum + (src.nateroth||0)+(src.allyroth||0)+(src.elevate||0)+(src.voya||0)+(src.hsa||0);
+    return sum;
+  }, 0);
+}
+
+// Compute the average monthly contribution flowing into a goal from "now" (selVal) until projected completion.
+// Returns null if the goal has no projected completion or no months between now and completion.
+function getAvgContribToCompletion(g, series, projCompletion, selVal, current) {
+  if (!projCompletion) return null;
+  const compKey = `${projCompletion.year}-${String(projCompletion.month).padStart(2,'0')}`;
+  // Find the series point at completion
+  const compIdx = series.findIndex(pt => pt.key === compKey);
+  if (compIdx < 0) return null;
+  // For car2 specifically, the pool changes after car1 deadline — track savings+carfund
+  const isCar2 = (g.sourceKeys || []).includes('car2');
+  const keys = isCar2 ? ['savings', 'carfund'] : (g.sourceKeys || ['savings']);
+  const compPt = series[compIdx];
+  const endValue = isCar2
+    ? (compPt.savings || 0) + Math.max(0, compPt.carfund || 0)
+    : getGoalPoolValue(keys, compPt);
+  // Months from "now" to completion
+  const [selYr, selMon] = selVal.split('-').map(Number);
+  const monthsToComplete = (projCompletion.year - selYr) * 12 + (projCompletion.month - selMon);
+  if (monthsToComplete <= 0) return null;
+  const startValue = isCar2
+    ? (current.savings || 0) + Math.max(0, current.carfund || 0)
+    : getGoalPoolValue(keys, current);
+  const totalGrowth = endValue - startValue;
+  return totalGrowth / monthsToComplete;
+}
+
 function renderGoals(cur, selVal) {
   const data = loadData();
   const goals = data.goals || getDefaultGoals();
 
-  // Build event-aware forecast projection from Current Situation scenario
+  // Update scenario indicator pill
+  const pillEl = document.getElementById('bs-goals-scenario-pill');
+  if (pillEl) {
+    const sc = (data.scenarios || []).find(s => s.id === (data.activeScenarioId || activeScenarioId));
+    pillEl.textContent = sc ? sc.name : '';
+  }
+
+  // Build event-aware forecast projection from active scenario
   const forecastSeries = buildGoalForecastSeries();
 
   const p = getProjAssumptions();
@@ -3351,14 +3475,19 @@ function renderGoals(cur, selVal) {
     const remaining = Math.max(0, g.target - current);
     const deadlineParts = g.deadline ? g.deadline.split('-').map(Number) : null;
     const deadlineLabel = deadlineParts ? `${MONTHS[deadlineParts[1]-1]} ${deadlineParts[0]}` : null;
-    // Saving: for waterfall goals, use this month's allocated share; otherwise use the goal's contrib
-    const monthlyContrib = g.waterfall ? (waterfallAlloc[g.id] || 0) : getContribForGoal(g);
 
     // Projected completion: all goals use the forecast series directly
     const isInvestGoal = g.contribType === 'invest' ||
       (g.sourceKeys || []).some(k => ['invest','nateroth','allyroth','elevate','voya','hsa'].includes(k));
     const projCompletion = remaining > 0 ? findGoalCompletion(g, forecastSeries, car1Target, car1Deadline) : null;
     const projLabel = projCompletion ? `${MONTHS[projCompletion.month-1]} ${projCompletion.year}` : null;
+
+    // Saving: average monthly contribution from "now" until projected completion.
+    // Falls back to the goal's static contrib if no projection / already done / no time left.
+    const avgContrib = getAvgContribToCompletion(g, forecastSeries, projCompletion, selVal, cur);
+    const monthlyContrib = avgContrib != null
+      ? avgContrib
+      : (g.waterfall ? (waterfallAlloc[g.id] || 0) : getContribForGoal(g));
 
     let monthsToDeadline = null;
     if (deadlineParts) {
@@ -3982,6 +4111,15 @@ function loadActiveScenario() {
   renderProjection();
   renderForecast();
   renderScenarioTabs();
+  // Reset investment contribution override so the field re-derives from the new scenario
+  const contribEl = document.getElementById('inv-mo-contrib');
+  if (contribEl) {
+    contribEl.dataset.userOverride = '0';
+    contribEl.value = '';
+  }
+  // Refresh views that depend on the active scenario
+  if (typeof renderBS === 'function') renderBS();
+  if (typeof renderInvestments === 'function') renderInvestments();
 }
 
 // ---- Phases ----
@@ -4169,8 +4307,8 @@ function renderScenarioTabs() {
     </div>`;
   }).join('');
 
-  // Render into both the Projection tab and the Forecast tab
-  ['scenario-tabs', 'forecast-scenario-tabs'].forEach(id => {
+  // Render into both the Projection folder bar and the legacy scenario-tabs container (if it exists)
+  ['proj-scenario-tabs', 'scenario-tabs', 'forecast-scenario-tabs'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.innerHTML = html;
   });
