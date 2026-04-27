@@ -329,7 +329,8 @@
 
   .is-preset { font-size: 12px; padding: 6px 12px; }
   .is-preset.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
-  .is-monthly-table { min-width: 100%; table-layout: fixed; }
+  .is-monthly-table { min-width: 100%; }
+  #is-table { table-layout: fixed; }
   .is-monthly-table th {
     font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em;
     color: var(--text3); padding: 10px 14px; border-bottom: 2px solid var(--border);
@@ -2598,7 +2599,7 @@ function renderIS() {
       </th>`
     : '';
   const thead = `<tr>
-    <th class="row-label" style="width:200px;">Category</th>
+    <th class="row-label" style="width:200px;"></th>
     ${periods.map(p => `<th style="width:${monthColWidth}px;">${colLabel(p)}</th>`).join('')}
     ${aggHeaderHtml}
   </tr>`;
@@ -5371,7 +5372,7 @@ function renderForecast() {
     const dot = col.hasEvents ? ' <span style="color:var(--gold);">●</span>' : '';
     return `<th style="${bg}min-width:82px;">${MONTHS[col.month-1]}<br><span style="font-size:9px;opacity:0.55;">${col.year}</span>${dot}</th>`;
   };
-  document.getElementById('fc-thead').innerHTML = `<tr><th class="row-label">Line Item</th>${allCols.map(colHead).join('')}</tr>`;
+  document.getElementById('fc-thead').innerHTML = `<tr><th class="row-label"></th>${allCols.map(colHead).join('')}</tr>`;
 
   // ---- Cell helpers ----
   const priorBg = 'background:var(--surface2);color:var(--text2);';
