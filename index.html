@@ -661,9 +661,21 @@
     <div class="header-subtitle">Personal Financial Dashboard · v4</div>
   </div>
   <div style="display:flex;align-items:center;gap:20px;">
-    <div class="header-right">
-      <div class="kpi-value" id="header-networth" style="color:#B8D4A0;font-size:18px;">—</div>
-      <div class="last-updated" id="header-date">Loading...</div>
+    <div class="header-right" style="display:flex;align-items:center;gap:24px;">
+      <div id="header-runway-tile" title="Cash ÷ T12 monthly expenses" style="text-align:center;cursor:help;">
+        <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:2px;">Cash Runway</div>
+        <div class="kpi-value" id="header-runway" style="color:#B8D4A0;font-size:18px;">—</div>
+      </div>
+      <div style="height:44px;width:1px;background:rgba(255,255,255,0.4);"></div>
+      <div title="Trailing 12 Months" style="text-align:center;cursor:help;">
+        <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:2px;">Savings Rate</div>
+        <div class="kpi-value" id="header-savings-rate" style="color:#B8D4A0;font-size:18px;">—</div>
+      </div>
+      <div style="height:44px;width:1px;background:rgba(255,255,255,0.4);"></div>
+      <div id="header-networth-tile" title="As of most recent month" style="text-align:center;cursor:help;">
+        <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:2px;">Net Worth</div>
+        <div class="kpi-value" id="header-networth" style="color:#B8D4A0;font-size:18px;">—</div>
+      </div>
     </div>
   </div>
 </div>
@@ -3211,6 +3223,84 @@ function populateBSDropdown() {
   if (!keys.includes(sel.value)) sel.value = keys[0];
 }
 
+// Compute and write the three header metrics (savings rate, runway, net worth)
+// based on the latest available balance data + T12 IS data. Safe to call from anywhere.
+function updateHeaderMetrics() {
+  const data = loadData();
+  const latest = (typeof getLatestActualMonth === 'function') ? getLatestActualMonth() : null;
+  if (!latest) return;
+  const { year, month: mon } = latest;
+  const latestKey = getMonthKey(year, mon);
+  const cur = data.balances[latestKey] || {};
+
+  // Net worth
+  const totalAssets = (cur.checking||0)+(cur.efund||0)+(cur.savings||0)
+                    +(cur.nateroth||0)+(cur.allyroth||0)+(cur.elevate||0)+(cur.voya||0)+(cur.hsa||0);
+  const nwEl = document.getElementById('header-networth');
+  if (nwEl) {
+    const totalRounded = Math.round(totalAssets);
+    nwEl.textContent = '$' + Math.abs(totalRounded).toLocaleString();
+    if (totalRounded < 0) nwEl.textContent = '(' + nwEl.textContent + ')';
+  }
+  const nwTile = document.getElementById('header-networth-tile');
+  if (nwTile) nwTile.title = `As of ${MONTHS_FULL[mon-1]} ${year}`;
+
+  // T12 aggregates: walk back 12 months and sum income, savings contributions, expenses
+  let t12Income = 0, t12Savings = 0, t12Expenses = 0;
+  for (let i = 0; i < 12; i++) {
+    let m = mon - i;
+    let y = year;
+    while (m < 1) { m += 12; y--; }
+    if (typeof getMonthISData === 'function') {
+      const md = getMonthISData(y, m);
+      if (md) {
+        t12Income  += md.grossIncome || 0;
+        t12Savings += (md.s401k || 0) + (md.sRoth || 0) + (md.sHSA || 0)
+                    + (md.m401k || 0) + (md.mHSA || 0);
+        t12Expenses += (md.premiums||0) + (md.hcServices||0) + (md.hcOther||0)
+                    + (md.rent||0) + (md.utilities||0) + (md.housingOther||0)
+                    + (md.gas||0) + (md.carIns||0) + (md.transportOther||0)
+                    + (md.groceries||0) + (md.restaurants||0)
+                    + (md.personalItems||0) + (md.entertainment||0) + (md.travel||0)
+                    + (md.subscriptions||0) + (md.misc||0);
+                    // Note: largeOneTime intentionally excluded from runway expense baseline
+      }
+    }
+  }
+
+  // Savings rate
+  const srEl = document.getElementById('header-savings-rate');
+  const srTile = srEl ? srEl.closest('div[title]') : null;
+  if (srEl) {
+    if (t12Income > 0) {
+      const rate = (t12Savings / t12Income) * 100;
+      srEl.textContent = `${rate.toFixed(1)}%`;
+      if (srTile) {
+        srTile.title = 'Target: 25%';
+      }
+    } else {
+      srEl.textContent = '—';
+    }
+  }
+
+  // Months of Runway = (checking + e-fund + savings) / T12 avg monthly expenses, floored
+  const liquidCash = Math.max(0, cur.checking || 0) + (cur.efund || 0) + (cur.savings || 0);
+  const avgMonthlyExpenses = t12Expenses / 12;
+  const runwayEl = document.getElementById('header-runway');
+  const runwayTile = document.getElementById('header-runway-tile');
+  if (runwayEl) {
+    if (avgMonthlyExpenses > 0) {
+      const months = Math.floor(liquidCash / avgMonthlyExpenses);
+      runwayEl.textContent = `${months} ${months === 1 ? 'Month' : 'Months'}`;
+      if (runwayTile) {
+        runwayTile.title = 'Target: 6 Months';
+      }
+    } else {
+      runwayEl.textContent = '—';
+    }
+  }
+}
+
 function renderBS() {
   populateBSDropdown();
   const selVal = document.getElementById('bs-month').value;
@@ -3248,8 +3338,8 @@ function renderBS() {
   const yoyChange = yoyTotal > 0 ? totalAssets - yoyTotal : null;
   const yoyLabel  = yoyTotal > 0 ? `${MONTHS[mon-1]} ${year-1}` : 'No prior year data';
 
-  document.getElementById('header-networth').textContent = fmt(totalAssets);
-  document.getElementById('header-date').textContent = `as of ${MONTHS[mon-1]} ${year}`;
+  // updateHeaderMetrics handles header-networth, savings rate, runway
+  updateHeaderMetrics();
 
   document.getElementById('bs-balance-header').textContent = `${MONTHS[mon-1]} ${year}`;
   document.getElementById('bs-sub-prev-val').textContent   = `${MONTHS[prevMon-1]} ${prevYear}`;
@@ -6479,8 +6569,9 @@ function saveTxData() {
   const cur = data.balances[latestBalKey] || {};
   const total = (cur.checking||0)+(cur.efund||0)+(cur.savings||0)
               +(cur.nateroth||0)+(cur.allyroth||0)+(cur.elevate||0)+(cur.voya||0)+(cur.hsa||0);
-  if (total > 0) document.getElementById('header-networth').textContent = fmt(total);
-  document.getElementById('header-date').textContent = `as of ${MONTHS[latest.month-1]} ${latest.year}`;
+  // updateHeaderMetrics writes the rounded header values
+  updateHeaderMetrics();
+  /* header-date removed */
   const banner = document.createElement('div');
   banner.style.cssText = 'position:fixed;bottom:24px;right:24px;background:var(--accent);color:white;padding:12px 20px;border-radius:8px;font-size:13px;font-weight:600;box-shadow:0 4px 16px rgba(0,0,0,0.15);z-index:9999;';
   banner.textContent = '✓ Transactions saved — dashboard updated';
@@ -6512,16 +6603,7 @@ function saveBalanceData() {
   const sel = document.getElementById('bs-month');
   if (sel) sel.value = currentEntryKey;
   renderBS();
-
-  // Update header net worth and date
-  const cur = data.balances[currentEntryKey];
-  if (cur) {
-    const total = (cur.checking||0)+(cur.efund||0)+(cur.savings||0)
-                +(cur.nateroth||0)+(cur.allyroth||0)+(cur.elevate||0)+(cur.voya||0)+(cur.hsa||0);
-    if (total > 0) document.getElementById('header-networth').textContent = fmt(total);
-    const [yr, mo] = currentEntryKey.split('-').map(Number);
-    document.getElementById('header-date').textContent = `as of ${MONTHS[mo-1]} ${yr}`;
-  }
+  // (renderBS calls updateHeaderMetrics internally)
 
   const fb = document.getElementById('bal-feedback');
   fb.classList.add('visible');
@@ -6553,8 +6635,9 @@ async function clearBalanceInputs() {
   const cur = latestData.balances[latestBalKey] || {};
   const total = (cur.checking||0)+(cur.efund||0)+(cur.savings||0)
               +(cur.nateroth||0)+(cur.allyroth||0)+(cur.elevate||0)+(cur.voya||0)+(cur.hsa||0);
-  if (total > 0) document.getElementById('header-networth').textContent = fmt(total);
-  document.getElementById('header-date').textContent = `as of ${MONTHS[latest.month-1]} ${latest.year}`;
+  // updateHeaderMetrics writes rounded header values
+  updateHeaderMetrics();
+  /* header-date removed */
   updateEntryMonthGrid();
 }
 
@@ -6595,7 +6678,7 @@ function renderRecurringPanel() {
   const data = loadData();
   const existing = data.transactions[currentEntryKey] || [];
   const existingSigs = new Set(existing.map(tx =>
-    `${tx.type}|${tx.category}|${tx.subcategory}`.toLowerCase()
+    `${tx.type}|${tx.category}|${tx.subcategory}|${(tx.notes||'').trim()}`.toLowerCase()
   ));
 
   const list = document.getElementById('recurring-checklist');
@@ -6635,7 +6718,7 @@ function renderRecurringPanel() {
       <button class="btn btn-secondary" style="width:100%;" onclick="addRecurringTemplate()">+ Add Item</button>`;
   } else {
     list.innerHTML = templates.map(t => {
-      const alreadyPresent = existingSigs.has(`${t.type}|${t.category}|${t.subcategory}`.toLowerCase());
+      const alreadyPresent = existingSigs.has(`${t.type}|${t.category}|${t.subcategory}|${(t.notes||'').trim()}`.toLowerCase());
       const fmtAmt = t.amount ? `$${parseFloat(t.amount).toLocaleString('en-US', {minimumFractionDigits:2})}` : '';
       return `<label style="display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;cursor:${alreadyPresent?'default':'pointer'};background:${alreadyPresent?'var(--surface2)':'var(--surface)'};opacity:${alreadyPresent?'0.5':'1'};">
         <input type="checkbox" value="${t.id}" ${alreadyPresent?'disabled':'checked'} style="accent-color:var(--accent);width:15px;height:15px;flex-shrink:0;">
@@ -6712,7 +6795,7 @@ function insertRecurringItems() {
   if (!data.transactions[currentEntryKey]) data.transactions[currentEntryKey] = [];
   const existing = data.transactions[currentEntryKey];
   const existingSigs = new Set(existing.map(tx =>
-    `${tx.type}|${tx.category}|${tx.subcategory}`.toLowerCase()
+    `${tx.type}|${tx.category}|${tx.subcategory}|${(tx.notes||'').trim()}`.toLowerCase()
   ));
 
   const checked = [...document.querySelectorAll('#recurring-checklist input:checked')].map(el => el.value);
@@ -6720,7 +6803,7 @@ function insertRecurringItems() {
   checked.forEach(id => {
     const t = templates.find(r => r.id === id);
     if (!t) return;
-    const sig = `${t.type}|${t.category}|${t.subcategory}`.toLowerCase();
+    const sig = `${t.type}|${t.category}|${t.subcategory}|${(t.notes||'').trim()}`.toLowerCase();
     if (existingSigs.has(sig)) return;
     data.transactions[currentEntryKey].push({
       type: t.type, category: t.category, subcategory: t.subcategory,
@@ -7812,11 +7895,10 @@ function init() {
   const latestBalKey = getMonthKey(latest.year, latest.month);
   const cur = data.balances[latestBalKey] || data.balances['2026-02'];
   if (cur) {
-    const total = (cur.checking||0) + (cur.efund||0) + (cur.savings||0)
-                + (cur.nateroth||0) + (cur.allyroth||0) + (cur.elevate||0) + (cur.voya||0) + (cur.hsa||0);
-    document.getElementById('header-networth').textContent = fmt(total);
+    // updateHeaderMetrics writes rounded header values for net worth, savings rate, and runway
+    updateHeaderMetrics();
   }
-  document.getElementById('header-date').textContent = `as of ${MONTHS[latest.month-1]} ${latest.year}`;
+  /* header-date removed */
 }
 
 try {
