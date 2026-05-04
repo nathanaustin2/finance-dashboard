@@ -783,7 +783,15 @@
       </div>
     </div>
     <div style="display:flex;flex-direction:column;gap:16px;">
-      <div class="card">
+      <div class="card" style="position:relative;">
+        <button onclick="openTrendPopup()" title="Expand chart" style="
+          position:absolute;top:12px;right:12px;
+          border:1px solid var(--border);background:var(--surface);color:var(--text2);
+          border-radius:6px;cursor:pointer;padding:3px 8px;font-size:13px;line-height:1;
+          font-family:var(--font-mono);transition:background 0.15s,color 0.15s;z-index:5;"
+          onmouseenter="this.style.background='var(--surface2)';this.style.color='var(--text)'"
+          onmouseleave="this.style.background='var(--surface)';this.style.color='var(--text2)'"
+          >⛶</button>
         <div class="card-title">Net Worth Trend</div>
         <div id="bs-trend"></div>
       </div>
@@ -1031,6 +1039,55 @@
 </div> <!-- /#page-projections -->
 
 <!-- ==================== CASH FLOW ASSUMPTIONS POPUP ==================== -->
+<!-- Net Worth Trend popup (full-screen expanded view) -->
+<div id="trend-popup-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1500;align-items:center;justify-content:center;padding:24px;" onclick="if(event.target===this)closeTrendPopup()">
+  <div id="trend-popup-card" style="background:var(--surface);border:1px solid var(--border);border-radius:12px;width:95vw;height:90vh;max-width:1600px;box-shadow:0 12px 60px rgba(0,0,0,0.3);overflow:hidden;display:flex;flex-direction:column;">
+    <div style="padding:18px 24px;border-bottom:0.5px solid var(--border);display:flex;align-items:center;justify-content:space-between;">
+      <div id="trend-popup-title" style="font-family:var(--font-display);font-size:16px;font-weight:700;color:var(--text);">Net Worth Trend</div>
+      <button onclick="closeTrendPopup()" title="Close" style="
+        border:1px solid var(--border);background:var(--surface);color:var(--text2);
+        border-radius:6px;cursor:pointer;padding:4px 12px;font-size:14px;line-height:1;
+        font-family:var(--font-mono);"
+        onmouseenter="this.style.background='var(--surface2)';this.style.color='var(--text)'"
+        onmouseleave="this.style.background='var(--surface)';this.style.color='var(--text2)'"
+        >&#x2715;</button>
+    </div>
+    <div id="trend-popup-body" style="flex:1;overflow:hidden;padding:20px;display:flex;gap:16px;">
+      <!-- LEFT: chart -->
+      <div id="trend-popup-chart" style="flex:1;min-width:0;display:flex;align-items:center;justify-content:center;"></div>
+      <!-- RIGHT: date controls rail -->
+      <div style="width:170px;flex-shrink:0;display:flex;flex-direction:column;gap:12px;">
+        <!-- Change tile -->
+        <div id="trend-change-tile" style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:10px 12px;">
+          <div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px;">Change in Range</div>
+          <div id="trend-change-amount" style="font-family:var(--font-mono);font-size:17px;font-weight:700;color:var(--accent);">+$0</div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:5px;">
+          <div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:2px;">Quick Range</div>
+          <button class="trend-preset-btn active" data-preset="t12" onclick="setTrendPreset('t12', this)" style="font-size:11px;padding:5px 10px;background:var(--accent);color:white;border:1px solid var(--accent);border-radius:5px;cursor:pointer;text-align:left;font-family:var(--font-body);font-weight:600;">1 Year</button>
+          <button class="trend-preset-btn" data-preset="2y"  onclick="setTrendPreset('2y', this)" style="font-size:11px;padding:5px 10px;background:var(--surface);border:1px solid var(--border);border-radius:5px;cursor:pointer;text-align:left;font-family:var(--font-body);color:var(--text);">2 Years</button>
+          <button class="trend-preset-btn" data-preset="3y"  onclick="setTrendPreset('3y', this)" style="font-size:11px;padding:5px 10px;background:var(--surface);border:1px solid var(--border);border-radius:5px;cursor:pointer;text-align:left;font-family:var(--font-body);color:var(--text);">3 Years</button>
+          <button class="trend-preset-btn" data-preset="all" onclick="setTrendPreset('all', this)" style="font-size:11px;padding:5px 10px;background:var(--surface);border:1px solid var(--border);border-radius:5px;cursor:pointer;text-align:left;font-family:var(--font-body);color:var(--text);">All Time</button>
+        </div>
+        <div style="height:0.5px;background:var(--border);"></div>
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          <div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:2px;">Custom Range</div>
+          <div style="display:flex;align-items:center;gap:5px;">
+            <span style="font-size:10px;color:var(--text2);width:24px;">From</span>
+            <select id="trend-from-month" onchange="applyTrendCustomRange()" style="flex:1;font-size:10px;padding:3px 4px;border:1px solid var(--border);border-radius:4px;background:var(--surface);"></select>
+            <select id="trend-from-year" onchange="onTrendYearChange('from')" style="width:50px;font-size:10px;padding:3px 4px;border:1px solid var(--border);border-radius:4px;background:var(--surface);"></select>
+          </div>
+          <div style="display:flex;align-items:center;gap:5px;">
+            <span style="font-size:10px;color:var(--text2);width:24px;">To</span>
+            <select id="trend-to-month" onchange="applyTrendCustomRange()" style="flex:1;font-size:10px;padding:3px 4px;border:1px solid var(--border);border-radius:4px;background:var(--surface);"></select>
+            <select id="trend-to-year" onchange="onTrendYearChange('to')" style="width:50px;font-size:10px;padding:3px 4px;border:1px solid var(--border);border-radius:4px;background:var(--surface);"></select>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Unified app dialog modal (replaces native alert/confirm) -->
 <div id="app-dialog-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.35);z-index:2000;align-items:center;justify-content:center;padding:24px;">
   <div id="app-dialog-card" style="background:var(--surface);border:1px solid var(--border);border-radius:12px;width:100%;max-width:440px;box-shadow:0 8px 40px rgba(0,0,0,0.2);overflow:hidden;" onclick="event.stopPropagation()">
@@ -1259,6 +1316,7 @@
           <option value="2026" selected>2026</option>
           <option value="2025">2025</option>
           <option value="2024">2024</option>
+          <option value="2023">2023</option>
         </select>
       </div>
       <div class="month-grid" id="entry-month-grid"></div>
@@ -1604,6 +1662,188 @@ function appAlert(message, opts = {}) {
 }
 function appConfirm(message, opts = {}) {
   return appDialog({ message, ...opts });
+}
+
+// =====================================================================
+// NET WORTH TREND — full-screen popup with date range selectors
+// =====================================================================
+let _trendPopupState = { mode: 'preset', preset: 't12', selVal: null, months: 12 };
+
+function openTrendPopup() {
+  const overlay = document.getElementById('trend-popup-overlay');
+  const titleEl = document.getElementById('trend-popup-title');
+  if (!overlay) return;
+
+  // Mirror the title from the small chart's card title
+  const trendCard = document.querySelector('#bs-trend')?.closest('.card');
+  const smallTitle = trendCard?.querySelector('.card-title')?.textContent;
+  if (smallTitle) titleEl.textContent = smallTitle;
+
+  // Show the overlay first so the body has dimensions
+  overlay.style.display = 'flex';
+
+  // Populate year dropdowns from available balance data
+  populateTrendYearDropdowns();
+
+  // Default to t12 ending at the BS month
+  const selVal = document.getElementById('bs-month')?.value;
+  _trendPopupState = { mode: 'preset', preset: 't12', selVal, months: 12 };
+  syncCustomRangeToState();
+  renderTrendPopupChart();
+
+  document.addEventListener('keydown', _trendPopupKeyHandler);
+}
+function closeTrendPopup() {
+  const overlay = document.getElementById('trend-popup-overlay');
+  if (overlay) overlay.style.display = 'none';
+  document.removeEventListener('keydown', _trendPopupKeyHandler);
+}
+function _trendPopupKeyHandler(e) {
+  if (e.key === 'Escape') { e.preventDefault(); closeTrendPopup(); }
+}
+
+function renderTrendPopupChart() {
+  const data = loadData();
+  if (!_trendPopupState.selVal) return;
+  renderBSTrend(data, _trendPopupState.selVal, 'trend-popup-chart', _trendPopupState.months);
+}
+
+function setTrendPreset(preset, btn) {
+  // Update button styling
+  document.querySelectorAll('.trend-preset-btn').forEach(b => {
+    b.classList.remove('active');
+    b.style.background = 'var(--surface)';
+    b.style.color      = 'var(--text)';
+    b.style.borderColor = 'var(--border)';
+    b.style.fontWeight = 'normal';
+  });
+  if (btn) {
+    btn.classList.add('active');
+    btn.style.background = 'var(--accent)';
+    btn.style.color      = 'white';
+    btn.style.borderColor = 'var(--accent)';
+    btn.style.fontWeight = '600';
+  }
+
+  const data = loadData();
+  const balKeys = Object.keys(data.balances || {})
+    .filter(k => /^\d{4}-\d{2}$/.test(k))
+    .sort();
+  const latest = balKeys[balKeys.length - 1] || (document.getElementById('bs-month')?.value);
+
+  let months;
+  if (preset === '6m')        months = 6;
+  else if (preset === 't12')  months = 12;
+  else if (preset === '2y')   months = 24;
+  else if (preset === '3y')   months = 36;
+  else if (preset === 'all')  months = balKeys.length || 12;
+  else months = 12;
+
+  _trendPopupState = { mode: 'preset', preset, selVal: latest, months };
+  syncCustomRangeToState();
+  renderTrendPopupChart();
+}
+
+// Update the custom range dropdowns (From/To month + year) to match the currently-rendered range.
+// Called whenever a preset is selected so the custom controls don't get out of sync with the chart.
+function syncCustomRangeToState() {
+  const { selVal, months } = _trendPopupState;
+  if (!selVal || !months) return;
+  const [endYr, endMo] = selVal.split('-').map(Number);
+  // Compute the start key (months back from end, inclusive)
+  let startMo = endMo - (months - 1);
+  let startYr = endYr;
+  while (startMo < 1) { startMo += 12; startYr--; }
+  // Update From dropdowns
+  const fy = document.getElementById('trend-from-year');
+  const fm = document.getElementById('trend-from-month');
+  const ty = document.getElementById('trend-to-year');
+  const tm = document.getElementById('trend-to-month');
+  if (fy) fy.value = String(startYr);
+  if (fm) { fillTrendMonthDropdown('from', startYr, startMo); }
+  if (ty) ty.value = String(endYr);
+  if (tm) { fillTrendMonthDropdown('to', endYr, endMo); }
+}
+
+// Map of year → sorted array of available months (only months with real balance data)
+let _trendAvailableMonths = {};
+
+function populateTrendYearDropdowns() {
+  const data = loadData();
+  const balKeys = Object.keys(data.balances || {}).filter(k => /^\d{4}-\d{2}$/.test(k)).sort();
+  if (balKeys.length === 0) return;
+
+  // Build available months by year
+  _trendAvailableMonths = {};
+  balKeys.forEach(k => {
+    const yr = parseInt(k.slice(0, 4));
+    const mo = parseInt(k.slice(5, 7));
+    if (!_trendAvailableMonths[yr]) _trendAvailableMonths[yr] = [];
+    if (!_trendAvailableMonths[yr].includes(mo)) _trendAvailableMonths[yr].push(mo);
+  });
+  Object.keys(_trendAvailableMonths).forEach(yr => _trendAvailableMonths[yr].sort((a,b)=>a-b));
+
+  const firstYr = parseInt(balKeys[0].slice(0, 4));
+  const lastYr  = parseInt(balKeys[balKeys.length - 1].slice(0, 4));
+  const firstMo = parseInt(balKeys[0].slice(5, 7));
+  const lastMo  = parseInt(balKeys[balKeys.length - 1].slice(5, 7));
+  const yrOpts = [];
+  for (let y = firstYr; y <= lastYr; y++) yrOpts.push(`<option value="${y}">${y}</option>`);
+  const fy = document.getElementById('trend-from-year');
+  const ty = document.getElementById('trend-to-year');
+  if (fy) { fy.innerHTML = yrOpts.join(''); fy.value = String(firstYr); }
+  if (ty) { ty.innerHTML = yrOpts.join(''); ty.value = String(lastYr); }
+  // Populate month dropdowns based on the selected year's available months
+  fillTrendMonthDropdown('from', firstYr, firstMo);
+  fillTrendMonthDropdown('to',   lastYr,  lastMo);
+}
+
+function fillTrendMonthDropdown(side, year, preferredMo) {
+  const sel = document.getElementById(`trend-${side}-month`);
+  if (!sel) return;
+  const months = _trendAvailableMonths[year] || [];
+  const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  sel.innerHTML = months.map(m =>
+    `<option value="${m}">${monthNames[m-1]}</option>`
+  ).join('');
+  // Preserve preferred month if it exists in the new list, else default to first/last
+  if (preferredMo && months.includes(preferredMo)) {
+    sel.value = String(preferredMo);
+  } else if (months.length) {
+    // 'from' dropdown defaults to earliest available month, 'to' to latest
+    sel.value = String(side === 'from' ? months[0] : months[months.length - 1]);
+  }
+}
+
+function onTrendYearChange(side) {
+  const yrSel = document.getElementById(`trend-${side}-year`);
+  if (!yrSel) return;
+  const yr = parseInt(yrSel.value);
+  // Repopulate the month dropdown for this side's new year
+  fillTrendMonthDropdown(side, yr);
+  applyTrendCustomRange();
+}
+
+function applyTrendCustomRange() {
+  const fm = parseInt(document.getElementById('trend-from-month')?.value);
+  const fy = parseInt(document.getElementById('trend-from-year')?.value);
+  const tm = parseInt(document.getElementById('trend-to-month')?.value);
+  const ty = parseInt(document.getElementById('trend-to-year')?.value);
+  if (isNaN(fm) || isNaN(fy) || isNaN(tm) || isNaN(ty)) return;
+  // Compute number of months between (inclusive)
+  const months = (ty - fy) * 12 + (tm - fm) + 1;
+  if (months < 2) return; // need at least 2 points
+  const endKey = `${ty}-${String(tm).padStart(2,'0')}`;
+  // Clear active preset styling
+  document.querySelectorAll('.trend-preset-btn').forEach(b => {
+    b.classList.remove('active');
+    b.style.background  = 'var(--surface)';
+    b.style.color       = 'var(--text)';
+    b.style.borderColor = 'var(--border)';
+    b.style.fontWeight  = 'normal';
+  });
+  _trendPopupState = { mode: 'custom', preset: null, selVal: endKey, months };
+  renderTrendPopupChart();
 }
 
 // =====================================================================
@@ -2815,11 +3055,9 @@ function renderIS() {
     const hasTxs = txs && txs.some(t => parseFloat(t.amount) !== 0);
     if (hasTxs) {
       txs.forEach(t => {
-        if (t.type === 'Savings' && t.subcategory === 'ROTH IRA') {
-          const amt = parseFloat(t.amount) || 0;
-          if ((t.notes || '').toLowerCase().includes('ally')) c.rothAlly += amt;
-          else c.rothNate += amt;
-        }
+        // Roth contributions are aggregated by TAX YEAR separately (see rothByTaxYear below).
+        // Skip them here so they're not double-counted.
+        if (t.type === 'Savings' && t.subcategory === 'ROTH IRA') return;
         if (t.type === 'Savings' && t.category === 'Personal Contribution' && t.subcategory === '401k')
           c.k401 += parseFloat(t.amount) || 0;
         if (t.type === 'Savings' && t.category === 'Personal Contribution' && t.subcategory === 'HSA') {
@@ -2838,24 +3076,58 @@ function renderIS() {
       const hist = (HISTORICAL_IS[yr] || {})[mo];
       if (hist) {
         const sv = hist.savings || {};
-        // Use explicit per-person Roth fields if available, else fall back to legacy split
-        if (sv.sRothNate !== undefined) {
-          c.rothNate += sv.sRothNate;
-        } else if (yr === 2025 && mo === 12) {
-          c.rothNate += 580;
-        } else {
-          c.rothNate += (sv.sRoth || 0);
-        }
-        if (sv.sRothAlly !== undefined) {
-          c.rothAlly += sv.sRothAlly;
-        }
+        // (Historical data: Roth is also handled via rothByTaxYear — skipped here.)
         c.k401 += sv.s401k || 0;
-        // HSA: sHSAContrib = personal contributions only (excludes withdrawals), plus mHSA employer match
         c.hsa  += (sv.sHSAContrib !== undefined ? sv.sHSAContrib : Math.max(0, sv.sHSA || 0)) + (sv.mHSA || 0);
       }
     }
     return c;
   };
+
+  // Aggregate Roth contributions by TAX YEAR by scanning ALL transactions in the dataset.
+  // A January 2026 contribution with no override is tax year 2025; an April 20 2026
+  // contribution is tax year 2026; etc. The dropdown stores explicit overrides on tx.taxYear.
+  const rothByTaxYear = {};
+  const rawDataAll = loadData();
+  Object.keys(rawDataAll.transactions || {}).forEach(monthKey => {
+    if (!/^\d{4}-\d{2}$/.test(monthKey)) return;
+    (rawDataAll.transactions[monthKey] || []).forEach(t => {
+      if (t.type !== 'Savings' || t.subcategory !== 'ROTH IRA') return;
+      if (t.category !== 'Personal Contribution') return;
+      const amt = parseFloat(t.amount) || 0;
+      const isAlly = (t.notes || '').toLowerCase().includes('ally');
+      const person = isAlly ? 'Ally' : 'Nate';
+      // Use stored override if present, else infer from date (or month key as fallback)
+      const stored = (t.taxYear !== undefined && t.taxYear !== null) ? parseInt(t.taxYear) : null;
+      const ty = stored !== null ? stored : rothTaxYear(t.date, person, monthKey);
+      if (ty === null) return;
+      if (!rothByTaxYear[ty]) rothByTaxYear[ty] = { rothNate: 0, rothAlly: 0 };
+      if (isAlly) rothByTaxYear[ty].rothAlly += amt;
+      else        rothByTaxYear[ty].rothNate += amt;
+    });
+  });
+  // Also fold in HISTORICAL_IS Roth values (these don't have explicit dates/overrides — assume calendar year = tax year)
+  Object.keys(HISTORICAL_IS || {}).forEach(yrKey => {
+    const yrNum = parseInt(yrKey);
+    Object.keys(HISTORICAL_IS[yrKey] || {}).forEach(moKey => {
+      const moNum = parseInt(moKey);
+      // Skip months that have actual transactions (would double-count)
+      const txs = (rawDataAll.transactions || {})[getMonthKey(yrNum, moNum)];
+      if (txs && txs.some(t => parseFloat(t.amount) !== 0)) return;
+      const sv = (HISTORICAL_IS[yrKey][moKey] || {}).savings || {};
+      if (!rothByTaxYear[yrNum]) rothByTaxYear[yrNum] = { rothNate: 0, rothAlly: 0 };
+      if (sv.sRothNate !== undefined) {
+        rothByTaxYear[yrNum].rothNate += sv.sRothNate;
+      } else if (yrNum === 2025 && moNum === 12) {
+        rothByTaxYear[yrNum].rothNate += 580;
+      } else {
+        rothByTaxYear[yrNum].rothNate += (sv.sRoth || 0);
+      }
+      if (sv.sRothAlly !== undefined) {
+        rothByTaxYear[yrNum].rothAlly += sv.sRothAlly;
+      }
+    });
+  });
 
   const contribByYear = {};
   yearsInRange.forEach(yr => {
@@ -2863,10 +3135,13 @@ function renderIS() {
     contribByYear[yr] = { rothNate: 0, rothAlly: 0, k401: 0, hsa: 0 };
     for (let mo = 1; mo <= maxMo; mo++) {
       const mc = getMonthContrib(yr, mo);
-      contribByYear[yr].rothNate += mc.rothNate;
-      contribByYear[yr].rothAlly += mc.rothAlly;
       contribByYear[yr].k401    += mc.k401;
       contribByYear[yr].hsa     += mc.hsa;
+    }
+    // Roth comes from the tax-year aggregation, not calendar months
+    if (rothByTaxYear[yr]) {
+      contribByYear[yr].rothNate = rothByTaxYear[yr].rothNate;
+      contribByYear[yr].rothAlly = rothByTaxYear[yr].rothAlly;
     }
   });
 
@@ -3663,11 +3938,14 @@ function bsSelectAcct(key, label) {
   renderBSTrend(data, selVal);
 }
 
-function renderBSTrend(data, selVal) {
-  // Build trailing 12-month window ending at selVal
+function renderBSTrend(data, selVal, targetId, numMonths) {
+  const target = targetId || 'bs-trend';
+  const isPopup = target === 'trend-popup-chart';
+  const months = numMonths || 12;
+  // Build trailing window of N months ending at selVal
   const [endYear, endMonth] = selVal.split('-').map(Number);
   const window = [];
-  for (let i = 11; i >= 0; i--) {
+  for (let i = months - 1; i >= 0; i--) {
     let mo = endMonth - i;
     let yr = endYear;
     while (mo < 1) { mo += 12; yr--; }
@@ -3690,19 +3968,32 @@ function renderBSTrend(data, selVal) {
     return { key: k, val: v };
   }).filter(Boolean);
 
-  const trendTitle = selectedBsAcct ? selectedBsLabel : 'Net Worth';
-  const trendCard = document.querySelector('#bs-trend').closest('.card');
-  if (trendCard) {
-    const titleEl = trendCard.querySelector('.card-title');
-    if (titleEl) titleEl.textContent = selectedBsAcct ? `${selectedBsLabel} trend` : 'Net Worth Trend';
+  // Update the small card's title (only when rendering the small chart)
+  if (!isPopup) {
+    const trendCard = document.querySelector('#bs-trend')?.closest('.card');
+    if (trendCard) {
+      const titleEl = trendCard.querySelector('.card-title');
+      if (titleEl) titleEl.textContent = selectedBsAcct ? `${selectedBsLabel} trend` : 'Net Worth Trend';
+    }
   }
-  if (points_data.length < 2) { document.getElementById('bs-trend').innerHTML = '<div class="empty-msg" style="padding:20px;">Need more months of data.</div>'; return; }
+  if (points_data.length < 2) {
+    document.getElementById(target).innerHTML = '<div class="empty-msg" style="padding:20px;">Need more months of data.</div>';
+    return;
+  }
 
   const vals = points_data.map(p => p.val);
   const keys = points_data.map(p => p.key);
   const n = vals.length;
-  const W = 280, H = 160, PAD = { top: 18, right: 8, bottom: 28, left: 46 };
+  // Larger chart geometry for popup so labels and dots scale appropriately
+  const W = isPopup ? 1200 : 280;
+  const H = isPopup ? 600  : 160;
+  const PAD = isPopup
+    ? { top: 30, right: 50, bottom: 50, left: 90 }
+    : { top: 18, right: 8,  bottom: 28, left: 46 };
   const cW = W - PAD.left - PAD.right, cH = H - PAD.top - PAD.bottom;
+  const labelFs = isPopup ? 14 : 8;
+  const dotR    = isPopup ? 8  : 4;
+  const dotRsm  = isPopup ? 5  : 2;
   const minVal = Math.min(...vals), maxVal = Math.max(...vals);
   const range = maxVal - minVal;
   const rawStep = range / 3;
@@ -3727,58 +4018,98 @@ function renderBSTrend(data, selVal) {
     if (gy < PAD.top - 2 || gy > PAD.top + cH + 2) continue;
     const label = gv >= 1000 ? `$${(gv/1000).toFixed(0)}k` : `$${gv}`;
     gridLines.push(`<line x1="${PAD.left}" y1="${gy.toFixed(1)}" x2="${(PAD.left+cW).toFixed(1)}" y2="${gy.toFixed(1)}" stroke="var(--border)" stroke-width="1" stroke-dasharray="3,3"/>
-      <text x="${(PAD.left-4).toFixed(1)}" y="${(gy+3).toFixed(1)}" text-anchor="end" font-size="8" font-family="DM Mono" fill="var(--text3)">${label}</text>`);
+      <text x="${(PAD.left-4).toFixed(1)}" y="${(gy+3).toFixed(1)}" text-anchor="end" font-size="${labelFs}" font-family="DM Mono" fill="var(--text3)">${label}</text>`);
   }
   const xLabels = [];
-  // Show 4 labels: index 0, ~n/3, ~2n/3, n-1
-  const labelIdxs = new Set([0, Math.round(n/3), Math.round(2*n/3), n-1]);
+  // Label density: small chart shows 4 evenly-spaced; popup anchors first+last and fills
+  // additional labels at equal distances in between.
+  let labelIdxs;
+  if (isPopup) {
+    if (n <= 12) {
+      labelIdxs = new Set(keys.map((_, i) => i));
+    } else {
+      // Pick how many labels total (up to ~12), always including first and last
+      const totalLabels = Math.min(12, n);
+      labelIdxs = new Set([0, n - 1]);
+      // Fill the interior with evenly-spaced indices
+      for (let k = 1; k < totalLabels - 1; k++) {
+        const idx = Math.round(k * (n - 1) / (totalLabels - 1));
+        labelIdxs.add(idx);
+      }
+    }
+  } else {
+    labelIdxs = new Set([0, Math.round(n/3), Math.round(2*n/3), n-1]);
+  }
   keys.forEach((k, i) => {
     if (!labelIdxs.has(i)) return;
     const [yr, mo] = k.split('-').map(Number);
-    xLabels.push(`<text x="${xOf(i).toFixed(1)}" y="${(H-6).toFixed(1)}" text-anchor="middle" font-size="8" font-family="DM Mono" fill="var(--text3)">${MONTHS[mo-1]}</text>`);
+    const labelText = isPopup ? `${MONTHS[mo-1]} ${String(yr).slice(2)}` : MONTHS[mo-1];
+    xLabels.push(`<text x="${xOf(i).toFixed(1)}" y="${(H-12).toFixed(1)}" text-anchor="middle" font-size="${labelFs}" font-family="DM Mono" fill="var(--text3)">${labelText}</text>`);
   });
   const dots = points_data.map((p, i) => {
     const x = xOf(i).toFixed(1), y = yOf(p.val).toFixed(1);
     return i === n - 1
-      ? `<circle cx="${x}" cy="${y}" r="4" fill="var(--accent)" stroke="white" stroke-width="1.5"/>`
-      : `<circle cx="${x}" cy="${y}" r="2" fill="var(--accent)" opacity="0.5"/>`;
+      ? `<circle cx="${x}" cy="${y}" r="${dotR}" fill="var(--accent)" stroke="white" stroke-width="${isPopup ? 2.5 : 1.5}"/>`
+      : `<circle cx="${x}" cy="${y}" r="${dotRsm}" fill="var(--accent)" opacity="0.5"/>`;
   }).join('');
-  const lastVal = points_data[n-1].val, firstVal = points_data[0].val;
-  const change = lastVal - firstVal;
-  const lastX = xOf(n-1), lastY = yOf(lastVal);
-  const lblY = lastY < PAD.top + 20 ? lastY + 14 : lastY - 6;
-  window._bsTrendPts = points_data.map((p,i) => ({ x: parseFloat(xOf(i).toFixed(1)), val: p.val, key: p.key }));
-  window._bsTrendPad = { l: PAD.left, t: PAD.top, cW, cH, W, H };
+  const lastVal = points_data[n-1].val;
 
-  document.getElementById('bs-trend').innerHTML = `
-    <div style="font-size:11px;color:var(--text2);margin-bottom:6px;">
-      <span style="font-family:var(--font-mono);font-weight:600;">${fmt(lastVal)}</span>
-    </div>
-    <div style="position:relative;">
-      <svg id="bs-trend-svg" viewBox="0 0 ${W} ${H}" style="width:100%;display:block;">
-        <defs><linearGradient id="trendGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="var(--accent)" stop-opacity="0.18"/><stop offset="100%" stop-color="var(--accent)" stop-opacity="0.01"/></linearGradient></defs>
+  // Update the popup's "Change in Range" tile
+  if (isPopup) {
+    const firstVal = points_data[0].val;
+    const change   = lastVal - firstVal;
+    const isUp     = change >= 0;
+    const colorVar = isUp ? 'var(--accent)' : 'var(--red)';
+    const sign     = isUp ? '+' : '−';
+    const amtEl = document.getElementById('trend-change-amount');
+    if (amtEl) {
+      amtEl.textContent = `${sign}${fmt(Math.abs(change))}`;
+      amtEl.style.color = colorVar;
+    }
+  }
+
+  // Use unique IDs per render target so multiple charts can coexist
+  const svgId  = `${target}-svg`;
+  const xhId   = `${target}-xh`;
+  const tipId  = `${target}-tip`;
+  const ptsKey = `_trendPts_${target}`;
+
+  window[ptsKey] = points_data.map((p,i) => ({ x: parseFloat(xOf(i).toFixed(1)), val: p.val, key: p.key }));
+
+  const headerHtml = isPopup
+    ? '' // Popup has its own header bar
+    : `<div style="font-size:11px;color:var(--text2);margin-bottom:6px;">
+         <span style="font-family:var(--font-mono);font-weight:600;">${fmt(lastVal)}</span>
+       </div>`;
+  const stroke = isPopup ? 3 : 2;
+  const xhWidth = isPopup ? 2 : 1;
+
+  document.getElementById(target).innerHTML = `
+    ${headerHtml}
+    <div style="position:relative;${isPopup ? 'width:100%;height:100%;' : ''}">
+      <svg id="${svgId}" viewBox="0 0 ${W} ${H}" style="width:100%;${isPopup ? 'height:100%;' : ''}display:block;" preserveAspectRatio="none">
+        <defs><linearGradient id="trendGrad-${target}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="var(--accent)" stop-opacity="0.18"/><stop offset="100%" stop-color="var(--accent)" stop-opacity="0.01"/></linearGradient></defs>
         ${gridLines.join('')}
-        <path d="${areaPath}" fill="url(#trendGrad)"/>
-        <polyline points="${ptStr}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="${areaPath}" fill="url(#trendGrad-${target})"/>
+        <polyline points="${ptStr}" fill="none" stroke="var(--accent)" stroke-width="${stroke}" stroke-linecap="round" stroke-linejoin="round"/>
         ${dots}${xLabels.join('')}
-        <line id="bs-trend-xh" x1="0" x2="0" y1="${PAD.top}" y2="${PAD.top+cH}" stroke="var(--text3)" stroke-width="1" stroke-dasharray="3,2" display="none"/>
+        <line id="${xhId}" x1="0" x2="0" y1="${PAD.top}" y2="${PAD.top+cH}" stroke="var(--text3)" stroke-width="${xhWidth}" stroke-dasharray="3,2" display="none"/>
         <rect data-bstrend="1" x="${PAD.left}" y="${PAD.top}" width="${cW}" height="${cH}" fill="transparent" pointer-events="all"/>
       </svg>
-      <div id="bs-trend-tip" style="display:none;position:absolute;top:10px;background:var(--text);color:var(--bg);padding:7px 11px;border-radius:6px;font-size:11px;font-family:var(--font-mono);pointer-events:none;z-index:20;white-space:nowrap;box-shadow:0 4px 16px rgba(0,0,0,0.2);line-height:1.7;"></div>
+      <div id="${tipId}" style="display:none;position:absolute;top:${isPopup ? 20 : 10}px;background:var(--text);color:var(--bg);padding:${isPopup ? '10px 14px' : '7px 11px'};border-radius:6px;font-size:${isPopup ? 14 : 11}px;font-family:var(--font-mono);pointer-events:none;z-index:20;white-space:nowrap;box-shadow:0 4px 16px rgba(0,0,0,0.2);line-height:1.7;"></div>
     </div>`;
 
-  const rect = document.querySelector('rect[data-bstrend]');
+  const svg  = document.getElementById(svgId);
+  const rect = svg ? svg.querySelector('rect[data-bstrend]') : null;
   if (rect) {
     const hover = e => {
-      const svg  = rect.closest('svg');
       const bbox = svg.getBoundingClientRect();
       const mx   = (e.clientX - bbox.left) * (W / bbox.width);
-      const pts  = window._bsTrendPts;
-      const pad  = window._bsTrendPad;
+      const pts  = window[ptsKey];
       let nearest = pts[0], minDist = Infinity;
       pts.forEach(p => { const d = Math.abs(p.x - mx); if (d < minDist) { minDist = d; nearest = p; } });
-      const xh  = document.getElementById('bs-trend-xh');
-      const tip = document.getElementById('bs-trend-tip');
+      const xh  = document.getElementById(xhId);
+      const tip = document.getElementById(tipId);
       const [yr, mo] = nearest.key.split('-').map(Number);
       tip.style.display = 'block';
       tip.innerHTML = `<div style="font-weight:700;margin-bottom:2px;">${MONTHS[mo-1]} ${yr}</div><div>${fmt(nearest.val)}</div>`;
@@ -3787,8 +4118,8 @@ function renderBSTrend(data, selVal) {
       xh.setAttribute('x1', nearest.x); xh.setAttribute('x2', nearest.x); xh.setAttribute('display','');
     };
     const leave = () => {
-      const tip = document.getElementById('bs-trend-tip');
-      const xh  = document.getElementById('bs-trend-xh');
+      const tip = document.getElementById(tipId);
+      const xh  = document.getElementById(xhId);
       if (tip) tip.style.display = 'none';
       if (xh)  xh.setAttribute('display','none');
     };
@@ -5664,6 +5995,65 @@ let txExpandedGroups = new Set();
 let txAllExpanded = false;
 let txPendingRows = []; // new rows awaiting commit, shown at top in white
 
+// Compute the tax year for a Roth IRA contribution based on date.
+// Rules: Apr 15 cutoff — Jan 1 - Apr 15 contributions can be designated to prior tax year.
+// Per user's stated history:
+//   - Nate Jan-Apr 15 2024 → 2024 (no retro to 2023)
+//   - Nate Jan-Apr 15 2025 → 2024 (retroactive)
+//   - Nate Apr 16 2025 - Apr 15 2026 → 2025
+//   - Nate Apr 16 2026+ → 2026
+//   - Ally first contribution Dec 2025; Dec 2025 - Apr 15 2026 → 2025
+//   - 2023: own year only (no retro)
+function rothTaxYear(dateStr, person, fallbackMonthKey) {
+  let yr, mo, day;
+  if (dateStr && /^\d{4}-\d{2}-\d{2}/.test(dateStr)) {
+    yr  = parseInt(dateStr.slice(0, 4));
+    mo  = parseInt(dateStr.slice(5, 7));
+    day = parseInt(dateStr.slice(8, 10));
+  } else if (dateStr && /^\d{2}\/\d{2}\/\d{4}/.test(dateStr)) {
+    mo  = parseInt(dateStr.slice(0, 2));
+    day = parseInt(dateStr.slice(3, 5));
+    yr  = parseInt(dateStr.slice(6, 10));
+  } else if (fallbackMonthKey && /^\d{4}-\d{2}$/.test(fallbackMonthKey)) {
+    // No date or unrecognized format — use the entry month, assume mid-month for cutoff
+    yr  = parseInt(fallbackMonthKey.slice(0, 4));
+    mo  = parseInt(fallbackMonthKey.slice(5, 7));
+    day = 15; // safe midpoint; only matters for the Apr boundary
+  } else {
+    return null;
+  }
+  if (yr <= 2023) return yr;
+  if (yr === 2024) return 2024; // user's rule: no retro to 2023
+  // Year >= 2025: Jan-Apr 15 → prior year
+  if (mo < 4 || (mo === 4 && day <= 15)) return yr - 1;
+  return yr;
+}
+
+// Render an editable tax-year dropdown for a Roth contribution row.
+// `txIndex` is the index in the txs array; the dropdown calls setRothTaxYear() on change.
+function rothTaxYearDropdown(tx, txIndex, person, fallbackMonthKey) {
+  // Default value: stored taxYear if user has explicitly set one; else inferred
+  const inferred = rothTaxYear(tx.date, person, fallbackMonthKey);
+  const stored = tx.taxYear !== undefined && tx.taxYear !== null ? parseInt(tx.taxYear) : null;
+  const current = stored !== null ? stored : inferred;
+  if (current === null) return '';
+  // Year options: current entry-year and previous year only
+  // (e.g. viewing 2025 shows 2024+2025; viewing 2026 shows 2025+2026)
+  const entryYr = fallbackMonthKey && /^\d{4}-/.test(fallbackMonthKey)
+    ? parseInt(fallbackMonthKey.slice(0, 4))
+    : new Date().getFullYear();
+  const years = [entryYr - 1, entryYr];
+  const opts = years.map(y =>
+    `<option value="${y}"${y === current ? ' selected' : ''}>${y}</option>`
+  ).join('');
+  const isOverridden = stored !== null && stored !== inferred;
+  const bg = isOverridden ? 'var(--accent-bg)' : 'var(--surface2)';
+  return `<select onchange="setRothTaxYear(${txIndex}, this.value)" title="Tax year this contribution applies to" style="
+    font-size:11px;font-family:var(--font-mono);font-weight:600;
+    padding:2px 4px;border:1px solid var(--border);border-radius:4px;
+    background:${bg};color:var(--text2);cursor:pointer;width:64px;">${opts}</select>`;
+}
+
 function renderTxTable(txs) {
   const tbody = document.getElementById('tx-tbody');
 
@@ -5752,6 +6142,10 @@ function renderTxTable(txs) {
                    : '';
       const amt = parseFloat(tx.amount) || 0;
       let catLabel, subLabel;
+      // Tax-year dropdown (only for Roth contributions)
+      const isRoth = tx.type === 'Savings' && (tx.subcategory || '').toLowerCase().includes('roth');
+      const person = isRoth ? ((tx.notes || '').toLowerCase().includes('ally') ? 'Ally' : 'Nate') : null;
+      const tyDropdown = isRoth ? rothTaxYearDropdown(tx, tx._i, person, currentEntryKey) : '';
       if (tx.type === 'Savings') {
         // Derive exact account name from notes + subcategory combination
         const note = (tx.notes || '').toLowerCase();
@@ -5777,7 +6171,7 @@ function renderTxTable(txs) {
         <td></td>
         <td style="${catStyle}">${catLabel}</td>
         <td style="${subStyle}">${subLabel}</td>
-        <td></td>
+        <td style="text-align:left;padding:0 8px;">${tyDropdown}</td>
         <td style="${txnStyle}">${tx.date || ''}</td>
         <td class="tx-amt">${amtCell(tx._i, amt)}</td>
         <td style="text-align:center;">${delBtn(tx._i)}</td>
@@ -6019,7 +6413,58 @@ function removeTx(i) {
   loadEntryData(currentEntryKey);
 }
 
+function setRothTaxYear(i, value) {
+  const data = loadData();
+  const txs = data.transactions[currentEntryKey];
+  if (!txs || !txs[i]) return;
+  txs[i].taxYear = parseInt(value);
+  saveData(data);
+  // Re-render so override styling updates without a flicker
+  renderTxTable(txs);
+}
+
+// Remove scheduled events from any month where BOTH transactions and balances have been
+// entered (i.e. the month is fully reconciled in monthly entry — both badges are checked).
+// Keeping projected events for fully-reconciled months just creates noise in the forecast.
+function cleanupPastEvents() {
+  const data = loadData();
+  if (!Array.isArray(data.scenarios)) return;
+  let anyChanged = false;
+  data.scenarios.forEach(sc => {
+    if (!Array.isArray(sc.events) || sc.events.length === 0) return;
+    const before = sc.events.length;
+    sc.events = sc.events.filter(ev => {
+      const monthKey = ev.month;
+      if (!monthKey || !/^\d{4}-\d{2}$/.test(monthKey)) return true;
+      // Has meaningful transactions?
+      const txs = (data.transactions || {})[monthKey] || [];
+      const hasMeaningfulTxs = txs.some(t =>
+        parseFloat(t.amount) !== 0 && t.amount !== '' && t.amount != null
+      );
+      // Has balances?
+      const bal = (data.balances || {})[monthKey] || {};
+      const hasBalances = Object.values(bal).some(v => v && parseFloat(v) > 0);
+      // Drop the event only when the month is fully reconciled
+      const fullyReconciled = hasMeaningfulTxs && hasBalances;
+      return !fullyReconciled;
+    });
+    if (sc.events.length !== before) anyChanged = true;
+  });
+  if (anyChanged) {
+    saveData(data);
+    // Sync the in-memory fcEvents for the active scenario so the events list re-renders correctly
+    const activeSc = data.scenarios.find(s => s.id === activeScenarioId);
+    if (activeSc) {
+      fcEvents = (activeSc.events || []).map(e => ({ ...e }));
+      if (typeof renderEventsList === 'function') renderEventsList();
+      if (typeof renderForecast === 'function') renderForecast();
+    }
+  }
+}
+
 function saveTxData() {
+  // Clean up scheduled events from months that now have actual transaction data
+  cleanupPastEvents();
   updateEntryProgress();
   updateEntryMonthGrid();
   // Refresh all dashboard tabs so they reflect the newly saved month
@@ -6059,6 +6504,9 @@ function saveBalanceData() {
     hsa:      parseFloat(document.getElementById('bal-hsa').value)      || 0,
   };
   saveData(data);
+
+  // If the month is now fully reconciled (txs + balances), drop stale scheduled events for it
+  cleanupPastEvents();
 
   // Force the BS dropdown to the newly saved month and re-render
   const sel = document.getElementById('bs-month');
@@ -7355,6 +7803,7 @@ function init() {
   // Default preset: T12 — set after renderIS so HISTORICAL_IS is available
   setISPreset('t12', document.querySelector('.is-preset.active'));
   initScenarios();   // loads scenario inputs before renderProjection runs
+  cleanupPastEvents(); // remove stale events for months that now have actuals
   renderProjection();
   updateEntryMonthGrid();
 
