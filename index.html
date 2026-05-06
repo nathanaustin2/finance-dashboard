@@ -6518,36 +6518,47 @@ function setRothTaxYear(i, value) {
 // Keeping projected events for fully-reconciled months just creates noise in the forecast.
 function cleanupPastEvents() {
   const data = loadData();
-  if (!Array.isArray(data.scenarios)) return;
+  // Use the in-memory `scenarios` array if it's been initialized; otherwise fall back to the
+  // serialized scenarios in localStorage. We mutate both layers and persist via saveScenarios()
+  // so the cleanup survives future syncEventsToScenario() calls.
+  const useInMemory = Array.isArray(scenarios) && scenarios.length > 0;
+  const target = useInMemory ? scenarios : (data.scenarios || []);
+  if (!Array.isArray(target) || target.length === 0) return;
   let anyChanged = false;
-  data.scenarios.forEach(sc => {
+
+  // Helper: should we drop this event?
+  const isFullyReconciled = (monthKey) => {
+    if (!monthKey || !/^\d{4}-\d{2}$/.test(monthKey)) return false;
+    const txs = (data.transactions || {})[monthKey] || [];
+    const hasMeaningfulTxs = txs.some(t =>
+      parseFloat(t.amount) !== 0 && t.amount !== '' && t.amount != null
+    );
+    const bal = (data.balances || {})[monthKey] || {};
+    const hasBalances = Object.values(bal).some(v => v && parseFloat(v) > 0);
+    return hasMeaningfulTxs && hasBalances;
+  };
+
+  target.forEach(sc => {
     if (!Array.isArray(sc.events) || sc.events.length === 0) return;
     const before = sc.events.length;
-    sc.events = sc.events.filter(ev => {
-      const monthKey = ev.month;
-      if (!monthKey || !/^\d{4}-\d{2}$/.test(monthKey)) return true;
-      // Has meaningful transactions?
-      const txs = (data.transactions || {})[monthKey] || [];
-      const hasMeaningfulTxs = txs.some(t =>
-        parseFloat(t.amount) !== 0 && t.amount !== '' && t.amount != null
-      );
-      // Has balances?
-      const bal = (data.balances || {})[monthKey] || {};
-      const hasBalances = Object.values(bal).some(v => v && parseFloat(v) > 0);
-      // Drop the event only when the month is fully reconciled
-      const fullyReconciled = hasMeaningfulTxs && hasBalances;
-      return !fullyReconciled;
-    });
+    sc.events = sc.events.filter(ev => !isFullyReconciled(ev.month));
     if (sc.events.length !== before) anyChanged = true;
   });
+
   if (anyChanged) {
-    saveData(data);
-    // Sync the in-memory fcEvents for the active scenario so the events list re-renders correctly
-    const activeSc = data.scenarios.find(s => s.id === activeScenarioId);
-    if (activeSc) {
-      fcEvents = (activeSc.events || []).map(e => ({ ...e }));
+    if (useInMemory) {
+      // Sync the active scenario's events to fcEvents and persist via saveScenarios()
+      // (which writes scenarios -> data.scenarios -> localStorage)
+      const activeSc = scenarios.find(s => s.id === activeScenarioId);
+      if (activeSc) {
+        fcEvents = (activeSc.events || []).map(e => ({ ...e }));
+      }
+      saveScenarios();
       if (typeof renderEventsList === 'function') renderEventsList();
       if (typeof renderForecast === 'function') renderForecast();
+    } else {
+      // Pre-init fallback: write directly to localStorage. initScenarios() will pick this up.
+      saveData(data);
     }
   }
 }
