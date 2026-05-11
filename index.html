@@ -672,6 +672,11 @@
         <div class="kpi-value" id="header-savings-rate" style="color:#B8D4A0;font-size:18px;">—</div>
       </div>
       <div style="height:44px;width:1px;background:rgba(255,255,255,0.4);"></div>
+      <div id="header-multiplier-tile" title="Target: —" style="text-align:center;cursor:help;">
+        <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:2px;">Income Multiple</div>
+        <div class="kpi-value" id="header-multiplier" style="color:#B8D4A0;font-size:18px;">—</div>
+      </div>
+      <div style="height:44px;width:1px;background:rgba(255,255,255,0.4);"></div>
       <div id="header-networth-tile" title="As of most recent month" style="text-align:center;cursor:help;">
         <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:2px;">Net Worth</div>
         <div class="kpi-value" id="header-networth" style="color:#B8D4A0;font-size:18px;">—</div>
@@ -3297,6 +3302,44 @@ function updateHeaderMetrics() {
       }
     } else {
       runwayEl.textContent = '—';
+    }
+  }
+
+  // Wealth Multiplier (Money Guy "Prodigious Accumulator")
+  // Multiplier = invested assets ÷ T12 gross income, where Money Guy publishes target multipliers
+  // for ages 25/30/35/40/45/50/55/60. We interpolate Nate's exact age between those waypoints.
+  const NATE_BIRTH = 1998;
+  // Use today's calendar year for age — current real age, not the latest data month
+  const ageToday = new Date().getFullYear() - NATE_BIRTH;
+  // Money Guy waypoints: [age, multiplier]
+  const PA_TARGETS = [[25,1],[30,2],[35,4],[40,6],[45,8],[50,12],[55,16],[60,20]];
+  const interpMultiplier = (age) => {
+    if (age <= PA_TARGETS[0][0]) return PA_TARGETS[0][1];
+    if (age >= PA_TARGETS[PA_TARGETS.length-1][0]) return PA_TARGETS[PA_TARGETS.length-1][1];
+    for (let i = 0; i < PA_TARGETS.length - 1; i++) {
+      const [a1, m1] = PA_TARGETS[i];
+      const [a2, m2] = PA_TARGETS[i+1];
+      if (age >= a1 && age <= a2) {
+        const t = (age - a1) / (a2 - a1);
+        return m1 + t * (m2 - m1);
+      }
+    }
+    return null;
+  };
+  const investedAssets = (cur.nateroth || 0) + (cur.allyroth || 0) + (cur.elevate || 0)
+                       + (cur.voya || 0) + (cur.hsa || 0);
+  const wmEl   = document.getElementById('header-multiplier');
+  const wmTile = document.getElementById('header-multiplier-tile');
+  if (wmEl) {
+    if (t12Income > 0) {
+      const currentMult = investedAssets / t12Income;
+      wmEl.textContent = `${currentMult.toFixed(1)}x`;
+      if (wmTile) {
+        const target = interpMultiplier(ageToday);
+        wmTile.title = `Target: ${target.toFixed(1)}x`;
+      }
+    } else {
+      wmEl.textContent = '—';
     }
   }
 }
