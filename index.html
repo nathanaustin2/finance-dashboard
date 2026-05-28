@@ -985,7 +985,7 @@
       <div class="card" style="padding:20px;">
         <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;color:var(--text3);margin-bottom:8px;">Projected Annual Income</div>
         <div style="font-family:var(--font-mono);font-size:22px;font-weight:700;" id="inv-stat-income">—</div>
-        <div style="font-size:11px;color:var(--text3);margin-top:4px;">4% withdrawal rule</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:4px;">4% rule · today's dollars</div>
       </div>
       <div class="card" style="padding:20px;">
         <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;color:var(--text3);margin-bottom:8px;">Projected Gain</div>
@@ -1036,9 +1036,17 @@
         </div>
 
         <div class="form-group" style="margin-bottom:20px;">
-          <label>Rate of Return</label>
+          <label>Annual Return (Nominal)</label>
           <div style="display:flex;align-items:center;gap:6px;">
-            <input type="number" id="inv-return-rate" value="6.0" step="0.1" min="0" max="25" style="flex:1;" oninput="renderInvestments()">
+            <input type="number" id="inv-return-rate" value="8.0" step="0.1" min="0" max="25" style="flex:1;" oninput="renderInvestments()">
+            <span style="font-size:13px;color:var(--text2);">%</span>
+          </div>
+        </div>
+
+        <div class="form-group" style="margin-bottom:20px;">
+          <label>Inflation</label>
+          <div style="display:flex;align-items:center;gap:6px;">
+            <input type="number" id="inv-inflation-rate" value="3.0" step="0.1" min="0" max="15" style="flex:1;" oninput="renderInvestments()">
             <span style="font-size:13px;color:var(--text2);">%</span>
           </div>
         </div>
@@ -2510,12 +2518,18 @@ function renderInvestments() {
     ? `$${Math.round(moContribOverride).toLocaleString()}/mo contributions`
     : `~$${Math.round(avgMoContrib).toLocaleString()}/mo avg contributions`;
 
+  // Deflate the nominal end-balance back to today's dollars, then apply the 4% withdrawal
+  const inflationRate = parseFloat(document.getElementById('inv-inflation-rate')?.value) || 0;
+  const inflationFactor = Math.pow(1 + inflationRate / 100, years);
+  const todayDollarsValue = lastPt.value / inflationFactor;
+  const todayDollarsIncome = todayDollarsValue * 0.04;
+
   document.getElementById('inv-stat-value').textContent       = '$' + Math.round(lastPt.value).toLocaleString();
-  document.getElementById('inv-stat-income').textContent      = '$' + Math.round(lastPt.value * 0.04).toLocaleString();
+  document.getElementById('inv-stat-income').textContent      = '$' + Math.round(todayDollarsIncome).toLocaleString();
   document.getElementById('inv-stat-gain').textContent        = '$' + Math.round(gain).toLocaleString();
   document.getElementById('inv-stat-gain-pct').textContent    = '+'+gainPct.toFixed(1)+'% return on capital deployed';
   document.getElementById('inv-chart-sub').textContent        =
-    `${CURRENT_YEAR}–${endYear} · ${years}-year projection at ${annualRate}% annual return · ${contribLabel}`;
+    `${CURRENT_YEAR}–${endYear} · ${years}-year projection at ${annualRate}% nominal return · ${inflationRate}% inflation · ${contribLabel}`;
 
   invDrawChart(pts, startBal);
 }
@@ -2625,6 +2639,7 @@ function invDrawChart(pts, startBal) {
 function getMonthISData(year, m) {
   const zero = () => ({ grossIncome: 0, taxes: 0, tithing: 0,
     s401k: 0, sRoth: 0, sHSA: 0, m401k: 0, mHSA: 0,
+    sHSAContrib: 0, sHSAWithdraw: 0, s401kWithdraw: 0, sRothWithdraw: 0,
     premiums: 0, hcServices: 0, hcOther: 0, rent: 0, utilities: 0, housingOther: 0,
     gas: 0, carIns: 0, transportOther: 0, groceries: 0, restaurants: 0,
     personalItems: 0, entertainment: 0, travel: 0, subscriptions: 0, largeOneTime: 0, misc: 0 });
@@ -2646,10 +2661,15 @@ function getMonthISData(year, m) {
         if (cat === 'Personal Contribution') {
           if (sub === '401k') d.s401k += amt;
           else if (sub === 'ROTH IRA') d.sRoth += amt;
-          else if (sub === 'HSA') d.sHSA += amt;
+          else if (sub === 'HSA') d.sHSAContrib += amt;
         } else if (cat === 'Matching') {
           if (sub === '401k') d.m401k += amt;
           else if (sub === 'HSA') d.mHSA += amt;
+        } else if (cat === 'Withdrawal') {
+          // Withdrawals are entered as positive amounts; the category marks them as outflows.
+          if (sub === '401k') d.s401kWithdraw += amt;
+          else if (sub === 'ROTH IRA') d.sRothWithdraw += amt;
+          else if (sub === 'HSA') d.sHSAWithdraw += amt;
         }
       } else if (type === 'Expense') {
         if (cat === 'Healthcare') {
@@ -2688,7 +2708,10 @@ function getMonthISData(year, m) {
       const ex = hist.expenses || {};
       d.s401k    = sv.s401k  || 0;
       d.sRoth    = sv.sRoth  || 0;
-      d.sHSA     = sv.sHSA   || 0;
+      // Historical months store HSA as a single value. None of the HISTORICAL_IS
+      // months contain withdrawals (those live in transaction data), so treat the
+      // stored value as gross contributions.
+      d.sHSAContrib = Math.max(0, sv.sHSA || 0);
       d.m401k    = sv.m401k  || 0;
       d.mHSA     = sv.mHSA   || 0;
       d.premiums      = ex.premiums      || 0;
@@ -2711,7 +2734,14 @@ function getMonthISData(year, m) {
     }
   }
 
-  d.totalPersonalSavings = d.s401k + d.sRoth + d.sHSA;
+  // Derive net savings values (gross contributions minus withdrawals).
+  // - sHSAContrib / s401k / sRoth = GROSS contributions (used by contribution-progress bars)
+  // - sHSA / s401kNet / sRothNet  = NET (used by savings rate, returns, net-savings totals)
+  d.sHSA      = d.sHSAContrib - d.sHSAWithdraw;
+  d.s401kNet  = d.s401k      - d.s401kWithdraw;
+  d.sRothNet  = d.sRoth      - d.sRothWithdraw;
+
+  d.totalPersonalSavings = d.s401kNet + d.sRothNet + d.sHSA;
   d.totalMatchSavings = d.m401k + d.mHSA;
   d.totalSavings = d.totalPersonalSavings + d.totalMatchSavings;
   d.netIncome = d.grossIncome - d.taxes;
@@ -3260,7 +3290,7 @@ function updateHeaderMetrics() {
       const md = getMonthISData(y, m);
       if (md) {
         t12Income  += md.grossIncome || 0;
-        t12Savings += (md.s401k || 0) + (md.sRoth || 0) + (md.sHSA || 0)
+        t12Savings += (md.s401kNet || 0) + (md.sRothNet || 0) + (md.sHSA || 0)
                     + (md.m401k || 0) + (md.mHSA || 0);
         t12Expenses += (md.premiums||0) + (md.hcServices||0) + (md.hcOther||0)
                     + (md.rent||0) + (md.utilities||0) + (md.housingOther||0)
@@ -6109,12 +6139,13 @@ const TX_CATEGORIES = {
   Income: ['Wage Income','Interest/Dividend Income','Other Income'],
   Taxes: ['Federal Income Tax','State Income Tax','Social Security','Medicare'],
   Tithing: ['Tithing'],
-  Savings: ['Personal Contribution','Matching'],
+  Savings: ['Personal Contribution','Matching','Withdrawal'],
   Expense: ['Healthcare','Housing','Transportation','Food','Personal','Miscellaneous']
 };
 const TX_SUBCATEGORIES = {
   'Personal Contribution': ['401k','ROTH IRA','HSA'],
   'Matching': ['401k','HSA'],
+  'Withdrawal': ['401k','ROTH IRA','HSA'],
   'Healthcare': ['Premiums','Healthcare Services','Other'],
   'Housing': ['Rent','Utilities','Maintenance/Other'],
   'Transportation': ['Gas','Insurance','Maintenance/Other'],
@@ -7930,11 +7961,38 @@ function migrateBalanceEvents() {
   if (changed) saveData(data);
 }
 
+function migrateHSAWithdrawals() {
+  // Historically, HSA withdrawals were recorded as negative-amount
+  // "Personal Contribution / HSA" rows (notes "HSA Withdrawl"). The dashboard now
+  // has an explicit "Withdrawal" category. Convert any negative-amount Savings rows
+  // to the Withdrawal category with a positive amount, so contribution-progress
+  // (gross) and savings-rate/returns (net) read cleanly without relying on sign.
+  const data = loadData();
+  let changed = false;
+  if (data.transactions) {
+    Object.keys(data.transactions).forEach(monthKey => {
+      const rows = data.transactions[monthKey];
+      if (!Array.isArray(rows)) return;
+      rows.forEach(tx => {
+        if (tx.type === 'Savings'
+            && (tx.category === 'Personal Contribution' || tx.category === 'Matching')
+            && (parseFloat(tx.amount) || 0) < 0) {
+          tx.category = 'Withdrawal';
+          tx.amount = Math.abs(parseFloat(tx.amount) || 0).toString();
+          changed = true;
+        }
+      });
+    });
+  }
+  if (changed) saveData(data);
+}
+
 function init() {
   seedHistoricalData();
   migrateHistoricalToTransactions();
   migratePayrollTax();
   migrateBalanceEvents();
+  migrateHSAWithdrawals();
 
   renderIS();
   // Default preset: T12 — set after renderIS so HISTORICAL_IS is available
