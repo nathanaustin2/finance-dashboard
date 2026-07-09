@@ -2828,6 +2828,24 @@ function toggleISGroup(groupKey) {
   });
 }
 
+// Collapse/expand every category group within a section at once (clicking the SAVINGS or
+// EXPENSES header). If any group in the section is currently expanded, collapse them all;
+// if they're all already collapsed, expand them all.
+function toggleISSection(groupKeysCsv) {
+  const keys = groupKeysCsv.split(',').filter(Boolean);
+  if (!keys.length) return;
+  if (!window._isCollapsed) window._isCollapsed = new Set();
+  const anyExpanded = keys.some(k => !window._isCollapsed.has(k));
+  const collapse = anyExpanded; // collapse all if any are open, else expand all
+  keys.forEach(k => {
+    if (collapse) window._isCollapsed.add(k);
+    else window._isCollapsed.delete(k);
+    document.querySelectorAll(`#is-tbody tr[data-ismember="${k}"]`).forEach(tr => {
+      tr.style.display = collapse ? 'none' : '';
+    });
+  });
+}
+
 function renderIS() {
   const fromMonth = parseInt(document.getElementById('is-from-month').value);
   const fromYear  = parseInt(document.getElementById('is-from-year').value);
@@ -2922,7 +2940,12 @@ function renderIS() {
     return `<td class="${isTotal?'total-col':''}">${fmt(v)}</td>`;
   };
   const vcKey = (v, isTotal=false) => `<td class="${isTotal?'total-col':''}" style="font-weight:700;">${fmt(v)}</td>`;
-  const sect = (label) => rows.push(`<tr class="section-header"><td class="row-label">${label}</td>${Array(numDataCols).fill('<td></td>').join('')}</tr>`);
+  const sect = (label, childGroups) => {
+    const attrs = (childGroups && childGroups.length)
+      ? ` data-issection="${childGroups.join(',')}" onclick="toggleISSection('${childGroups.join(',')}')" style="cursor:pointer;"`
+      : '';
+    rows.push(`<tr class="section-header"${attrs}><td class="row-label">${label}</td>${Array(numDataCols).fill('<td></td>').join('')}</tr>`);
+  };
   const row = (label, getter, indent='', labelSuffix='', groupKey='') => {
     const vals = monthData.map(d => getter(d));
     const tot = agg(vals);
@@ -2970,7 +2993,7 @@ function renderIS() {
   spacer();
   row('Tithing', d => d.tithing, 'indent');
   spacer();
-  sect('SAVINGS');
+  sect('SAVINGS', ['personalContrib', 'employerMatch']);
   savingsGroupRow('Personal Contribution', d => d.totalPersonalSavings, 'personalContrib');
   row('Roth IRA', d => d.sRoth, 'indent2', '', 'personalContrib');
   row('HSA', d => d.sHSA, 'indent2', '', 'personalContrib');
@@ -2982,7 +3005,7 @@ function renderIS() {
   spacer();
   keyRow('Income for Living', d => d.incomeForLiving);
   spacer();
-  sect('EXPENSES');
+  sect('EXPENSES', ['healthcare', 'housing', 'transportation', 'food', 'personal']);
   expenseCategoryRow('Healthcare', d => d.totalHealthcare, 'healthcare');
   row('Premiums', d => d.premiums, 'indent2', '', 'healthcare');
   row('Healthcare Services', d => d.hcServices, 'indent2', '', 'healthcare');
