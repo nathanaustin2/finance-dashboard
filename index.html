@@ -2814,6 +2814,20 @@ function toggleIsAggMode() {
   renderIS();
 }
 
+// Collapse/expand an Income Statement category group. Clicking a category row hides or
+// shows its subcategory rows (which fold into the category total). State persists in
+// window._isCollapsed so it survives re-renders. Toggles row visibility directly to stay
+// snappy and preserve scroll position.
+function toggleISGroup(groupKey) {
+  if (!window._isCollapsed) window._isCollapsed = new Set();
+  const nowCollapsed = !window._isCollapsed.has(groupKey);
+  if (nowCollapsed) window._isCollapsed.add(groupKey);
+  else window._isCollapsed.delete(groupKey);
+  document.querySelectorAll(`#is-tbody tr[data-ismember="${groupKey}"]`).forEach(tr => {
+    tr.style.display = nowCollapsed ? 'none' : '';
+  });
+}
+
 function renderIS() {
   const fromMonth = parseInt(document.getElementById('is-from-month').value);
   const fromYear  = parseInt(document.getElementById('is-from-year').value);
@@ -2909,20 +2923,28 @@ function renderIS() {
   };
   const vcKey = (v, isTotal=false) => `<td class="${isTotal?'total-col':''}" style="font-weight:700;">${fmt(v)}</td>`;
   const sect = (label) => rows.push(`<tr class="section-header"><td class="row-label">${label}</td>${Array(numDataCols).fill('<td></td>').join('')}</tr>`);
-  const row = (label, getter, indent='', labelSuffix='') => {
+  const row = (label, getter, indent='', labelSuffix='', groupKey='') => {
     const vals = monthData.map(d => getter(d));
     const tot = agg(vals);
-    rows.push(`<tr><td class="row-label ${indent}">${label}${labelSuffix}</td>${vals.map(v=>vc(v)).join('')}${showTotal ? vc(tot, true) : ''}</tr>`);
+    const hidden = groupKey && isCollapsed(groupKey) ? ' style="display:none;"' : '';
+    const attr = groupKey ? ` data-ismember="${groupKey}"` : '';
+    rows.push(`<tr${attr}${hidden}><td class="row-label ${indent}">${label}${labelSuffix}</td>${vals.map(v=>vc(v)).join('')}${showTotal ? vc(tot, true) : ''}</tr>`);
   };
-  const savingsGroupRow = (label, getter) => {
+  // Collapsible category groups: clicking a category row hides/shows its subcategory rows.
+  // State persists across re-renders in window._isCollapsed (a Set of group keys).
+  if (!window._isCollapsed) window._isCollapsed = new Set();
+  const isCollapsed = (key) => window._isCollapsed.has(key);
+  const savingsGroupRow = (label, getter, groupKey) => {
     const vals = monthData.map(d => getter(d));
     const tot = agg(vals);
-    rows.push(`<tr class="savings-group-row"><td class="row-label savings-group-label">${label}</td>${vals.map(v=>vc(v)).join('')}${showTotal ? vc(tot, true) : ''}</tr>`);
+    const attrs = groupKey ? ` data-isgroup="${groupKey}" onclick="toggleISGroup('${groupKey}')" style="cursor:pointer;"` : '';
+    rows.push(`<tr class="savings-group-row"${attrs}><td class="row-label savings-group-label">${label}</td>${vals.map(v=>vc(v)).join('')}${showTotal ? vc(tot, true) : ''}</tr>`);
   };
-  const expenseCategoryRow = (label, getter) => {
+  const expenseCategoryRow = (label, getter, groupKey) => {
     const vals = monthData.map(d => getter(d));
     const tot = agg(vals);
-    rows.push(`<tr class="expense-cat-row"><td class="row-label">${label}</td>${vals.map(v=>vc(v)).join('')}${showTotal ? vc(tot, true) : ''}</tr>`);
+    const attrs = groupKey ? ` data-isgroup="${groupKey}" onclick="toggleISGroup('${groupKey}')" style="cursor:pointer;"` : '';
+    rows.push(`<tr class="expense-cat-row"${attrs}><td class="row-label">${label}</td>${vals.map(v=>vc(v)).join('')}${showTotal ? vc(tot, true) : ''}</tr>`);
   };
   const subtotalRow = (label, getter) => {
     const vals = monthData.map(d => getter(d));
@@ -2949,38 +2971,38 @@ function renderIS() {
   row('Tithing', d => d.tithing, 'indent');
   spacer();
   sect('SAVINGS');
-  savingsGroupRow('Personal Contribution', d => d.totalPersonalSavings);
-  row('Roth IRA', d => d.sRoth, 'indent2');
-  row('HSA', d => d.sHSA, 'indent2');
-  row('401(k) Roth', d => d.s401k, 'indent2');
-  savingsGroupRow('Employer Match', d => d.totalMatchSavings);
-  row('HSA', d => d.mHSA, 'indent2');
-  row('401(k) Pre-tax', d => d.m401k, 'indent2');
+  savingsGroupRow('Personal Contribution', d => d.totalPersonalSavings, 'personalContrib');
+  row('Roth IRA', d => d.sRoth, 'indent2', '', 'personalContrib');
+  row('HSA', d => d.sHSA, 'indent2', '', 'personalContrib');
+  row('401(k) Roth', d => d.s401k, 'indent2', '', 'personalContrib');
+  savingsGroupRow('Employer Match', d => d.totalMatchSavings, 'employerMatch');
+  row('HSA', d => d.mHSA, 'indent2', '', 'employerMatch');
+  row('401(k) Pre-tax', d => d.m401k, 'indent2', '', 'employerMatch');
   subtotalRow('Total Savings', d => d.totalSavings);
   spacer();
   keyRow('Income for Living', d => d.incomeForLiving);
   spacer();
   sect('EXPENSES');
-  expenseCategoryRow('Healthcare', d => d.totalHealthcare);
-  row('Premiums', d => d.premiums, 'indent2');
-  row('Healthcare Services', d => d.hcServices, 'indent2');
-  row('Other', d => d.hcOther, 'indent2');
-  expenseCategoryRow('Housing', d => d.totalHousing);
-  row('Rent', d => d.rent, 'indent2');
-  row('Utilities', d => d.utilities, 'indent2');
-  row('Maintenance/Other', d => d.housingOther, 'indent2');
-  expenseCategoryRow('Transportation', d => d.totalTransport);
-  row('Gas', d => d.gas, 'indent2');
-  row('Insurance', d => d.carIns, 'indent2');
-  row('Maintenance/Other', d => d.transportOther, 'indent2');
-  expenseCategoryRow('Food', d => d.totalFood);
-  row('Groceries', d => d.groceries, 'indent2');
-  row('Restaurants', d => d.restaurants, 'indent2');
-  expenseCategoryRow('Personal', d => d.totalPersonal);
-  row('Personal Items', d => d.personalItems, 'indent2');
-  row('Entertainment', d => d.entertainment, 'indent2');
-  row('Travel', d => d.travel, 'indent2');
-  row('Subscriptions', d => d.subscriptions, 'indent2');
+  expenseCategoryRow('Healthcare', d => d.totalHealthcare, 'healthcare');
+  row('Premiums', d => d.premiums, 'indent2', '', 'healthcare');
+  row('Healthcare Services', d => d.hcServices, 'indent2', '', 'healthcare');
+  row('Other', d => d.hcOther, 'indent2', '', 'healthcare');
+  expenseCategoryRow('Housing', d => d.totalHousing, 'housing');
+  row('Rent', d => d.rent, 'indent2', '', 'housing');
+  row('Utilities', d => d.utilities, 'indent2', '', 'housing');
+  row('Maintenance/Other', d => d.housingOther, 'indent2', '', 'housing');
+  expenseCategoryRow('Transportation', d => d.totalTransport, 'transportation');
+  row('Gas', d => d.gas, 'indent2', '', 'transportation');
+  row('Insurance', d => d.carIns, 'indent2', '', 'transportation');
+  row('Maintenance/Other', d => d.transportOther, 'indent2', '', 'transportation');
+  expenseCategoryRow('Food', d => d.totalFood, 'food');
+  row('Groceries', d => d.groceries, 'indent2', '', 'food');
+  row('Restaurants', d => d.restaurants, 'indent2', '', 'food');
+  expenseCategoryRow('Personal', d => d.totalPersonal, 'personal');
+  row('Personal Items', d => d.personalItems, 'indent2', '', 'personal');
+  row('Entertainment', d => d.entertainment, 'indent2', '', 'personal');
+  row('Travel', d => d.travel, 'indent2', '', 'personal');
+  row('Subscriptions', d => d.subscriptions, 'indent2', '', 'personal');
   const lotToggleHtml = `<span onclick="window._excludeLargeOneTime=!window._excludeLargeOneTime;renderIS();" title="Toggle large one-time expenses" style="display:inline-flex;align-items:center;margin-left:8px;cursor:pointer;vertical-align:middle;">
     <span style="width:24px;height:14px;border-radius:7px;background:${window._excludeLargeOneTime ? 'var(--surface2)' : 'var(--accent)'};border:1px solid ${window._excludeLargeOneTime ? 'var(--border)' : 'var(--accent)'};position:relative;display:inline-block;flex-shrink:0;">
       <span style="width:10px;height:10px;border-radius:50%;background:white;position:absolute;top:1px;left:${window._excludeLargeOneTime ? '1px' : '11px'};"></span>
@@ -2993,9 +3015,10 @@ function renderIS() {
     const lotTot = lotVals.reduce((a,b)=>a+b,0);
     const greyCell = v => `<td style="color:var(--text3);opacity:0.75;font-style:italic;">${v !== 0 ? fmt(v) : '—'}</td>`;
     const greyTotalCell = v => `<td style="color:var(--text3);opacity:0.75;font-style:italic;border-left:2px solid var(--border);">${v !== 0 ? fmt(v) : '—'}</td>`;
-    rows.push(`<tr style="opacity:0.75;"><td class="row-label indent2" style="color:var(--text3);">Large One-time${lotToggleHtml}</td>${lotVals.map(v=>greyCell(v)).join('')}${showTotal ? greyTotalCell(lotTot) : ''}</tr>`);
+    const lotHidden = isCollapsed('personal') ? 'display:none;' : '';
+    rows.push(`<tr data-ismember="personal" style="opacity:0.75;${lotHidden}"><td class="row-label indent2" style="color:var(--text3);">Large One-time${lotToggleHtml}</td>${lotVals.map(v=>greyCell(v)).join('')}${showTotal ? greyTotalCell(lotTot) : ''}</tr>`);
   } else {
-    row('Large One-time', d => d.largeOneTime, 'indent2', lotToggleHtml);
+    row('Large One-time', d => d.largeOneTime, 'indent2', lotToggleHtml, 'personal');
   }
   expenseCategoryRow('Miscellaneous', d => d.misc);
   subtotalRow('Total Expenses', d => d.totalExpenses);
