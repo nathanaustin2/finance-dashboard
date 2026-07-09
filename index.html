@@ -8091,12 +8091,33 @@ function migrateHSAWithdrawals() {
   }
 }
 
+function migrateFastOfferingNotes() {
+  // The Fast Offering recurring template shares type/category ('Tithing'/'Tithing') with
+  // regular tithing. The "already added" check keys off type|category|subcategory|notes, so
+  // a blank-notes Fast Offering template collides with any tithing row that also has blank
+  // notes and is wrongly greyed out as "already added". Giving the template a distinct note
+  // ("Fast Offering") makes its signature unique so it can be added independently.
+  const data = loadData();
+  if (!Array.isArray(data.recurringTemplates)) return;
+  let changed = false;
+  data.recurringTemplates.forEach(t => {
+    if (t.type === 'Tithing'
+        && /fast\s*offering/i.test(t.label || '')
+        && !(t.notes || '').trim()) {
+      t.notes = 'Fast Offering';
+      changed = true;
+    }
+  });
+  if (changed) saveData(data);
+}
+
 function init() {
   seedHistoricalData();
   migrateHistoricalToTransactions();
   migratePayrollTax();
   migrateBalanceEvents();
   migrateHSAWithdrawals();
+  migrateFastOfferingNotes();
 
   renderIS();
   // Default preset: T12 — set after renderIS so HISTORICAL_IS is available
