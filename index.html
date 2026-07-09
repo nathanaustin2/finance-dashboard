@@ -3601,29 +3601,30 @@ function buildGoalForecastSeries() {
   const latestKey = balKeys[balKeys.length - 1] || getMonthKey(new Date().getFullYear(), new Date().getMonth());
   let [sy, sm] = latestKey.split('-').map(Number);
 
-  // Compute Car #1 target for car2 seeding
+  // Compute Car #1 target (kept for reference; the car goals now use a single cumulative
+  // cash-pool model rather than a separate car2 bucket).
   const _goals = data.goals || getDefaultGoals();
   const _car1Goal = _goals.find(g => g.id === 'car1') || {};
   const _car1Target = _car1Goal.target || 30000;
-  const _car1Pool = (_car1Goal.sourceKeys || ['carfund','savings']).reduce((s, k) => {
-    if (k === 'carfund')  return s + (lb.carfund  || 0);
-    if (k === 'savings')  return s + (lb.savings  || 0);
-    if (k === 'efund')    return s + (lb.efund    || 0);
-    return s;
-  }, 0);
-  const _car2Init = Math.max(0, _car1Pool - _car1Target);
 
   let runBal = {
     savings:  lb.savings  || 0,
     efund:    lb.efund    || 0,
     carfund:  lb.carfund  || 0,
-    car2:     _car2Init,
     nateroth: lb.nateroth || 0,
     allyroth: lb.allyroth || 0,
     elevate:  lb.elevate  || 0,
     voya:     lb.voya     || 0,
     hsa:      lb.hsa      || 0,
   };
+
+  // Cumulative dollars contributed to the cash pool (savings + carfund).
+  // Car goals are cumulative $30k thresholds on this: Car #1 = first $30k, Car #2 = next $30k.
+  // A car purchase spends money out of the pool but does NOT reduce cumulative progress
+  // (it consumes an already-counted allocation), so we track money spent on cars and add it
+  // back: cumulativePool = savings + carfund + carSpent. This keeps cumulative rising smoothly
+  // with surplus, unaffected by the purchase drain.
+  let carSpent = 0;
 
   const series = [];
   let y = sy, m = sm;
@@ -3677,7 +3678,6 @@ function buildGoalForecastSeries() {
     runBal.voya     = runBal.voya     * (1+investG);
     runBal.hsa      = runBal.hsa      * (1+investG) + proj.hsa + proj.matchHsa;
     runBal.carfund  = runBal.carfund  * (1+cashG);
-    runBal.car2     = runBal.car2     * (1+cashG);
     runBal.savings  = runBal.savings  * (1+cashG);
     runBal.efund    = runBal.efund    * (1+cashG);
 
@@ -3688,28 +3688,39 @@ function buildGoalForecastSeries() {
     const rbGet = k => {
       if (k === 'carfund') return runBal.carfund;
       if (k === 'efund')   return runBal.efund;
-      if (k === 'car2')    return runBal.car2;
       if (k === 'savings') return runBal.savings;
       return 0;
     };
     const rbAdd = (k, amt) => {
       if (k === 'carfund') runBal.carfund += amt;
       else if (k === 'efund') runBal.efund += amt;
-      else if (k === 'car2') { runBal.car2 += amt; runBal.savings += amt; } // car2 tracks into savings
       else runBal.savings += amt;
     };
     let surplus = rem;
     if (surplus >= 0) {
+      // Cumulative cash-pool value for car-goal headroom (savings + carfund + money already
+      // spent on cars). Car goals are sequential $30k thresholds on this cumulative figure.
+      const cumulativePool = runBal.savings + runBal.carfund + carSpent;
       for (const g of wGoals) {
         if (surplus <= 0) break;
         if (g.deadline && key > g.deadline) continue;
-        const keys = g.sourceKeys && g.sourceKeys.length ? g.sourceKeys : ['savings'];
-        const currentPool = keys.reduce((s, k) => s + rbGet(k), 0);
-        const needed = Math.max(0, g.target - currentPool);
+        const isCarGoal = g.id === 'car1' || g.id === 'car2';
+        let needed;
+        if (isCarGoal) {
+          // Cumulative threshold: Car #1 fills 0→30k, Car #2 fills 30k→60k.
+          const floor = (g.id === 'car2') ? _car1Target : 0;
+          const ceil  = floor + (g.target || 30000);
+          needed = Math.max(0, ceil - Math.max(cumulativePool, floor));
+        } else {
+          const keys = g.sourceKeys && g.sourceKeys.length ? g.sourceKeys : ['savings'];
+          const currentPool = keys.reduce((s, k) => s + rbGet(k), 0);
+          needed = Math.max(0, g.target - currentPool);
+        }
         if (needed <= 0) continue;
         const alloc = Math.min(surplus, needed);
         surplus -= alloc;
-        rbAdd(keys[0], alloc);
+        // Car goals deposit into the cash pool (savings); efund into efund.
+        rbAdd(g.id === 'efund' ? 'efund' : 'savings', alloc);
       }
       if (surplus > 0) runBal.savings += surplus;
     } else {
@@ -3723,25 +3734,36 @@ function buildGoalForecastSeries() {
     }
 
     if (proj.savingsSet   !== undefined) runBal.savings = proj.savingsSet;
-    if (proj.savingsDelta !== undefined) runBal.savings += proj.savingsDelta;
+    if (proj.savingsDelta !== undefined) {
+      runBal.savings += proj.savingsDelta;
+      // A negative savings delta here is the planned car purchase drawing from the pool.
+      // Count it as money spent on cars so cumulative pool progress isn't reduced by it.
+      if (proj.savingsDelta < 0) carSpent += -proj.savingsDelta;
+    }
     if (proj.efundSet     !== undefined) runBal.efund   = proj.efundSet;
     if (proj.efundDelta   !== undefined) runBal.efund  += proj.efundDelta;
     if (proj.carfundSet   !== undefined) runBal.carfund = proj.carfundSet;
     if (proj.carfundDelta !== undefined) runBal.carfund += proj.carfundDelta;
 
-    series.push({ key, year: y, month: m, ...runBal });
+    // cumulativePool = money contributed to the cash pool over time (unaffected by car purchases)
+    const cumulativePool = runBal.savings + runBal.carfund + carSpent;
+    series.push({ key, year: y, month: m, cumulativePool, ...runBal });
   }
   return series;
 }
 
 // Scan the forecast series and return {year, month} of first month the goal's balance hits target, or null.
 function findGoalCompletion(g, series, car1Target, car1Deadline) {
+  const CAR1_TARGET = car1Target || 30000;
   for (const pt of series) {
-    // For car2: only look at months AFTER the car1 purchase deadline, using savings+carfund
-    if ((g.sourceKeys || []).includes('car2')) {
-      if (car1Deadline && pt.key <= car1Deadline) continue;
-      const total = (pt.savings || 0) + Math.max(0, pt.carfund || 0);
-      if (total >= g.target) return { year: pt.year, month: pt.month };
+    // Car goals are cumulative $30k thresholds on the cash pool:
+    //   Car #1 complete when cumulativePool >= 30k; Car #2 complete when cumulativePool >= 60k.
+    if (g.id === 'car1') {
+      if ((pt.cumulativePool || 0) >= g.target) return { year: pt.year, month: pt.month };
+      continue;
+    }
+    if (g.id === 'car2') {
+      if ((pt.cumulativePool || 0) >= CAR1_TARGET + g.target) return { year: pt.year, month: pt.month };
       continue;
     }
     const total = (g.sourceKeys || []).reduce((sum, k) => {
@@ -3784,28 +3806,28 @@ function getGoalPoolValue(keys, src) {
 function getAvgContribToCompletion(g, series, projCompletion, selVal, current) {
   if (!projCompletion) return null;
   const compKey = `${projCompletion.year}-${String(projCompletion.month).padStart(2,'0')}`;
-  // Find the series point at completion
   const compIdx = series.findIndex(pt => pt.key === compKey);
   if (compIdx < 0) return null;
-  // For car2 specifically, the pool changes after car1 deadline — track savings+carfund
-  const isCar2 = (g.sourceKeys || []).includes('car2');
-  const keys = isCar2 ? ['savings', 'carfund'] : (g.sourceKeys || ['savings']);
   const compPt = series[compIdx];
-  const endValue = isCar2
-    ? (compPt.savings || 0) + Math.max(0, compPt.carfund || 0)
-    : getGoalPoolValue(keys, compPt);
-  // Months from "now" to completion
   const [selYr, selMon] = selVal.split('-').map(Number);
   const monthsToComplete = (projCompletion.year - selYr) * 12 + (projCompletion.month - selMon);
   if (monthsToComplete <= 0) return null;
-  const startValue = isCar2
-    ? (current.savings || 0) + Math.max(0, current.carfund || 0)
-    : getGoalPoolValue(keys, current);
+
+  // Car goals: measure average monthly increase in the cumulative cash pool (savings + carfund
+  // + money spent on cars). This reflects genuine money flowing into the pool and is unaffected
+  // by the car purchase drain, so it stays positive all the way to completion.
+  const isCarGoal = g.id === 'car1' || g.id === 'car2';
+  if (isCarGoal) {
+    const startCumulative = (current.savings || 0) + Math.max(0, current.carfund || 0);
+    const endCumulative   = compPt.cumulativePool || 0;
+    return Math.max(0, (endCumulative - startCumulative) / monthsToComplete);
+  }
+
+  const keys = g.sourceKeys || ['savings'];
+  const endValue = getGoalPoolValue(keys, compPt);
+  const startValue = getGoalPoolValue(keys, current);
   const totalGrowth = endValue - startValue;
-  // The "saving / mo" figure represents monthly progress toward the goal. If the tracked
-  // pool shrinks over the window (e.g. Car #2's savings+carfund pool is drained by the
-  // scheduled RAV4 purchase before Car #2 begins accumulating), totalGrowth can go negative.
-  // A negative "saving" is meaningless to display, so floor the rate at 0.
+  // Floor at 0 — a shrinking tracked pool shouldn't display as negative monthly saving.
   return Math.max(0, totalGrowth / monthsToComplete);
 }
 
@@ -3830,19 +3852,17 @@ function renderGoals(cur, selVal) {
   // when the projection is non-positive (e.g. a phase with no modeled surplus).
   const projectedSurplusMo = (p.surplusMo > 0) ? p.surplusMo : getTrailingAvgSurplus();
   const investCurrent = (cur.nateroth||0)+(cur.allyroth||0)+(cur.elevate||0)+(cur.voya||0)+(cur.hsa||0);
-  const carCurrent    = cur.carfund || 0;
   const car1Goal      = goals.find(g => g.id === 'car1') || {};
   const car1Target    = car1Goal.target || 30000;
   const car1Deadline  = car1Goal.deadline || null;
-  const car1Keys      = car1Goal.sourceKeys || ['carfund'];
-  const car1Pool      = car1Keys.reduce((sum, k) => {
-    if (k === 'carfund')  return sum + (cur.carfund  || 0);
-    if (k === 'savings')  return sum + (cur.savings  || 0);
-    if (k === 'efund')    return sum + (cur.efund    || 0);
-    if (k === 'checking') return sum + Math.max(0, cur.checking || 0);
-    return sum;
-  }, 0);
-  const car2Current   = Math.max(0, car1Pool - car1Target);
+  const car2Goal      = goals.find(g => g.id === 'car2') || {};
+  const car2Target    = car2Goal.target || 30000;
+  // Single cumulative cash pool (savings + carfund). Car goals are sequential thresholds:
+  //   Car #1 current = min(pool, 30k);  Car #2 current = clamp(pool - 30k, 0, 30k).
+  // "Today" nothing has been spent yet, so cumulative = current pool balance.
+  const cashPoolCurrent = (cur.savings || 0) + (cur.carfund || 0);
+  const car1Current   = Math.min(cashPoolCurrent, car1Target);
+  const car2Current   = Math.max(0, Math.min(cashPoolCurrent - car1Target, car2Target));
 
   const getValueForKey = (key) => {
     switch (key) {
@@ -3856,6 +3876,7 @@ function renderGoals(cur, selVal) {
       case 'voya':      return cur.voya     || 0;
       case 'hsa':       return cur.hsa      || 0;
       case 'invest':    return investCurrent;
+      case 'car1':      return car1Current;
       case 'car2':      return car2Current;
       case 'networth':  return Math.max(0, (cur.checking||0)+(cur.efund||0)+(cur.savings||0)+investCurrent);
       case 'totalcash': return Math.max(0, (cur.checking||0)+(cur.savings||0));
@@ -3864,6 +3885,9 @@ function renderGoals(cur, selVal) {
   };
 
   const getCurrentForGoal = (g) => {
+    // Car goals use the cumulative cash-pool currents computed above.
+    if (g.id === 'car1') return car1Current;
+    if (g.id === 'car2') return car2Current;
     const keys = g.sourceKeys || (g.sourceKey ? [g.sourceKey] : []);
     const total = keys.reduce((sum, k) => sum + getValueForKey(k), 0);
     return Math.min(total, g.target);
