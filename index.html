@@ -3802,7 +3802,11 @@ function getAvgContribToCompletion(g, series, projCompletion, selVal, current) {
     ? (current.savings || 0) + Math.max(0, current.carfund || 0)
     : getGoalPoolValue(keys, current);
   const totalGrowth = endValue - startValue;
-  return totalGrowth / monthsToComplete;
+  // The "saving / mo" figure represents monthly progress toward the goal. If the tracked
+  // pool shrinks over the window (e.g. Car #2's savings+carfund pool is drained by the
+  // scheduled RAV4 purchase before Car #2 begins accumulating), totalGrowth can go negative.
+  // A negative "saving" is meaningless to display, so floor the rate at 0.
+  return Math.max(0, totalGrowth / monthsToComplete);
 }
 
 function renderGoals(cur, selVal) {
