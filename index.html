@@ -706,13 +706,13 @@
       <div style="width:1px;height:24px;background:var(--border);margin:0 4px;"></div>
       <div class="controls" style="margin:0;">
         <label>From</label>
-        <select id="is-from-month" onchange="renderIS()">
+        <select id="is-from-month" onchange="onISDateManualChange()">
           <option value="1">Jan</option><option value="2">Feb</option><option value="3">Mar</option>
           <option value="4">Apr</option><option value="5">May</option><option value="6">Jun</option>
           <option value="7">Jul</option><option value="8">Aug</option><option value="9">Sep</option>
           <option value="10">Oct</option><option value="11">Nov</option><option value="12">Dec</option>
         </select>
-        <select id="is-from-year" onchange="renderIS()">
+        <select id="is-from-year" onchange="onISDateManualChange()">
           <option value="2023">2023</option>
           <option value="2024">2024</option>
           <option value="2025">2025</option>
@@ -721,13 +721,13 @@
           <option value="2028">2028</option>
         </select>
         <label>To</label>
-        <select id="is-to-month" onchange="renderIS()">
+        <select id="is-to-month" onchange="onISDateManualChange()">
           <option value="1">Jan</option><option value="2">Feb</option><option value="3">Mar</option>
           <option value="4">Apr</option><option value="5">May</option><option value="6">Jun</option>
           <option value="7">Jul</option><option value="8">Aug</option><option value="9">Sep</option>
           <option value="10">Oct</option><option value="11">Nov</option><option value="12">Dec</option>
         </select>
-        <select id="is-to-year" onchange="renderIS()">
+        <select id="is-to-year" onchange="onISDateManualChange()">
           <option value="2023">2023</option>
           <option value="2024">2024</option>
           <option value="2025">2025</option>
@@ -813,7 +813,14 @@
         <div id="bs-trend"></div>
       </div>
       <div class="card">
-        <div class="card-title">Asset Allocation</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;">
+          <div class="card-title" style="margin-bottom:0;">Asset Allocation</div>
+          <span title="Toggle cash in allocation" style="display:inline-flex;align-items:center;cursor:pointer;" onclick="window._allocShowNW=!window._allocShowNW;renderBS();">
+            <span id="bs-alloc-switch" style="width:32px;height:18px;border-radius:9px;background:var(--surface2);border:1px solid var(--border);position:relative;flex-shrink:0;display:inline-block;">
+              <span id="bs-alloc-knob" style="width:14px;height:14px;border-radius:50%;background:white;position:absolute;top:1px;left:1px;"></span>
+            </span>
+          </span>
+        </div>
         <div id="bs-allocation"></div>
       </div>
     </div>
@@ -2800,6 +2807,14 @@ function setISPreset(preset, btn) {
   renderIS();
 }
 
+// Called when the user manually edits any of the From/To month or year dropdowns.
+// A manual date change means the view no longer matches a preset, so clear the active
+// (green) highlight from all preset buttons, then re-render.
+function onISDateManualChange() {
+  document.querySelectorAll('.is-preset').forEach(b => b.classList.remove('active'));
+  renderIS();
+}
+
 function sumMonths(months) {
   if (!months.length) return {};
   const t = { ...months[0] };
@@ -3539,53 +3554,75 @@ function renderBS() {
 
   const usInvest  = (cur.nateroth||0) + (cur.allyroth||0) + (cur.hsa||0);
   const intInvest = (cur.elevate||0) + (cur.voya||0);
-  const usAlloc   = totalInvest > 0 ? usInvest  / totalInvest : 0.77;
-  const intAlloc  = totalInvest > 0 ? intInvest / totalInvest : 0.23;
+  // Bonds: currently no bond holdings, so $0 (kept as its own asset class for display and
+  // future use). Cash is tracked separately.
+  const bondsInvest = 0;
+  const usAlloc    = totalInvest > 0 ? usInvest    / totalInvest : 0.80;
+  const intAlloc   = totalInvest > 0 ? intInvest   / totalInvest : 0.20;
+  const bondsAlloc = totalInvest > 0 ? bondsInvest / totalInvest : 0;
 
   // Net worth view (includes cash)
   const cashTotal  = totalCash;
   const nwTotal    = totalAssets;
-  const usNWAlloc  = nwTotal > 0 ? usInvest  / nwTotal : 0;
-  const intNWAlloc = nwTotal > 0 ? intInvest / nwTotal : 0;
-  const cashNWAlloc = nwTotal > 0 ? cashTotal / nwTotal : 0;
+  const usNWAlloc    = nwTotal > 0 ? usInvest    / nwTotal : 0;
+  const intNWAlloc   = nwTotal > 0 ? intInvest   / nwTotal : 0;
+  const bondsNWAlloc = nwTotal > 0 ? bondsInvest / nwTotal : 0;
+  const cashNWAlloc  = nwTotal > 0 ? cashTotal   / nwTotal : 0;
 
   const allocToggleState = window._allocShowNW || false;
+  const TARGET_LINE = `Target: 80% US Stocks / 20% International Stocks / 0% Bonds`;
+
+  // Build a legend showing only asset classes that are actually represented (allocation > 0),
+  // so an empty class (e.g. no bonds) doesn't appear with a color dot.
+  const legend = (items) => {
+    const shown = items.filter(it => it.alloc > 0)
+      .map(it => `<span><span style="color:${it.color};">●</span> ${it.label} ${fmtPct(it.alloc)}</span>`)
+      .join('');
+    return `<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text2);margin-bottom:${allocToggleState ? '10' : '12'}px;flex-wrap:wrap;gap:2px 10px;">${shown}</div>`;
+  };
+  // Bar segments render at their true width; a 0% class is omitted entirely so the flex
+  // `gap` between segments doesn't leave a visible break where an empty class would sit.
+  const seg = (alloc, color, cap=false) =>
+    alloc > 0 ? `<div class="alloc-segment" style="width:${cap ? Math.min(alloc*100,100) : alloc*100}%;background:${color};"></div>` : '';
 
   const investBar = `
-    <div style="display:flex;justify-content:flex-end;margin-bottom:8px;">
-      <div onclick="window._allocShowNW=!window._allocShowNW;renderBS();" style="width:32px;height:18px;border-radius:9px;background:var(--surface2);border:1px solid var(--border);cursor:pointer;position:relative;flex-shrink:0;">
-        <div style="width:14px;height:14px;border-radius:50%;background:white;position:absolute;top:1px;left:1px;"></div>
-      </div>
-    </div>
     <div class="alloc-bar" style="margin-bottom:6px;">
-      <div class="alloc-segment" style="width:${usAlloc*100}%;background:var(--accent);"></div>
-      <div class="alloc-segment" style="width:${Math.min(intAlloc*100,100)}%;background:var(--gold);"></div>
+      ${seg(usAlloc, 'var(--accent)')}
+      ${seg(intAlloc, 'var(--gold)', true)}
+      ${seg(bondsAlloc, 'var(--red)')}
     </div>
-    <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text2);margin-bottom:12px;">
-      <span><span style="color:var(--accent);">●</span> US Large Cap ${fmtPct(usAlloc)}</span>
-      <span><span style="color:var(--gold);">●</span> International ${fmtPct(intAlloc)}</span>
-    </div>
-    <div style="font-size:11px;color:var(--text3);">Target: 80% US / 20% International / 0% Bonds</div>`;
+    ${legend([
+      { label: 'US Stocks',            alloc: usAlloc,    color: 'var(--accent)' },
+      { label: 'International Stocks',  alloc: intAlloc,   color: 'var(--gold)'   },
+      { label: 'Bonds',                alloc: bondsAlloc, color: 'var(--red)'    },
+    ])}
+    <div style="font-size:11px;color:var(--text3);">${TARGET_LINE}</div>`;
 
   const nwBar = `
-    <div style="display:flex;justify-content:flex-end;margin-bottom:8px;">
-      <div onclick="window._allocShowNW=!window._allocShowNW;renderBS();" style="width:32px;height:18px;border-radius:9px;background:var(--accent);border:1px solid var(--accent);cursor:pointer;position:relative;flex-shrink:0;">
-        <div style="width:14px;height:14px;border-radius:50%;background:white;position:absolute;top:1px;left:15px;"></div>
-      </div>
-    </div>
     <div class="alloc-bar" style="margin-bottom:4px;">
-      <div class="alloc-segment" style="width:${usNWAlloc*100}%;background:var(--accent);"></div>
-      <div class="alloc-segment" style="width:${intNWAlloc*100}%;background:var(--gold);"></div>
-      <div class="alloc-segment" style="width:${cashNWAlloc*100}%;background:var(--blue);"></div>
+      ${seg(usNWAlloc, 'var(--accent)')}
+      ${seg(intNWAlloc, 'var(--gold)')}
+      ${seg(bondsNWAlloc, 'var(--red)')}
+      ${seg(cashNWAlloc, 'var(--blue)')}
     </div>
-    <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text2);margin-bottom:10px;">
-      <span><span style="color:var(--accent);">●</span> US ${fmtPct(usNWAlloc)}</span>
-      <span><span style="color:var(--gold);">●</span> Intl ${fmtPct(intNWAlloc)}</span>
-      <span><span style="color:var(--blue);">●</span> Cash ${fmtPct(cashNWAlloc)}</span>
-    </div>
-    <div style="font-size:11px;color:var(--text3);">Total net worth: ${fmt(nwTotal)}</div>`;
+    ${legend([
+      { label: 'US Stocks',            alloc: usNWAlloc,    color: 'var(--accent)' },
+      { label: 'International Stocks',  alloc: intNWAlloc,   color: 'var(--gold)'   },
+      { label: 'Bonds',                alloc: bondsNWAlloc, color: 'var(--red)'    },
+      { label: 'Cash',                 alloc: cashNWAlloc,  color: 'var(--blue)'   },
+    ])}
+    <div style="font-size:11px;color:var(--text3);">${TARGET_LINE}</div>`;
 
   document.getElementById('bs-allocation').innerHTML = allocToggleState ? nwBar : investBar;
+
+  // Reflect toggle state on the header switch
+  const allocSwitch = document.getElementById('bs-alloc-switch');
+  const allocKnob   = document.getElementById('bs-alloc-knob');
+  if (allocSwitch && allocKnob) {
+    allocSwitch.style.background = allocToggleState ? 'var(--accent)' : 'var(--surface2)';
+    allocSwitch.style.borderColor = allocToggleState ? 'var(--accent)' : 'var(--border)';
+    allocKnob.style.left = allocToggleState ? '15px' : '1px';
+  }
 
   renderGoals(cur, selVal);
   renderBSTrend(data, selVal);
