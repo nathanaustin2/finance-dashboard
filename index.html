@@ -117,6 +117,9 @@
   .fin-table th:first-child { text-align: left; }
   .fin-table td { padding: 7px 12px; text-align: right; font-family: var(--font-mono); font-size: 12px; }
   .fin-table td:first-child { text-align: left; font-family: var(--font-body); }
+  .proj-edit-cell { cursor: text; }
+  .proj-edit-cell .proj-edit-val { border-bottom: 1px dashed var(--blue); color: var(--blue); padding-bottom: 1px; }
+  .proj-edit-cell:hover .proj-edit-val { background: var(--blue-bg); }
   .fin-table tr:hover td { background: var(--surface2); }
   .fin-table tr.total-row:hover td { background: var(--text); color: var(--bg); }
   .fin-table tr.tx-income td { background: #E8F5E4; }
@@ -1159,133 +1162,98 @@
 
   <div class="grid-4" id="proj-kpis" style="margin-bottom:20px;"></div>
 
-  <!-- Phase tab bar -->
-  <div id="phase-tabs" style="display:flex;align-items:center;gap:4px;margin-bottom:12px;flex-wrap:wrap;min-height:28px;"></div>
+  <!-- Phase tab bar + Edit Assumptions toggle -->
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+    <div id="phase-tabs" style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;flex:1;min-height:28px;"></div>
+    <button id="proj-edit-assum-btn" onclick="toggleProjAssumptions()" style="border:1px solid var(--border);background:var(--surface);border-radius:6px;padding:6px 14px;font-size:12px;font-family:var(--font-body);color:var(--text);cursor:pointer;display:flex;align-items:center;gap:6px;white-space:nowrap;flex-shrink:0;">
+      <span style="font-size:14px;line-height:1;">⚙</span><span id="proj-edit-assum-label">Edit Assumptions</span>
+    </button>
+  </div>
 
-  <div class="grid-2" style="margin-bottom:20px;">
-    <div class="card" style="padding:0;overflow:hidden;">
-      <table class="fin-table" id="proj-table">
-        <thead><tr><th>Line Item</th><th>Monthly</th><th>Annual</th><th>% of Gross</th></tr></thead>
-        <tbody id="proj-tbody"></tbody>
-      </table>
+  <!-- Phase header (shown when a phase is active, independent of the assumptions panel) -->
+  <div id="phase-header" style="display:none;margin-bottom:12px;padding:8px 10px;background:var(--surface2);border-radius:6px;align-items:center;gap:8px;flex-wrap:wrap;">
+    <span style="font-size:11px;font-weight:500;color:var(--text2);">Phase starts:</span>
+    <select id="phase-start-month" onchange="updatePhaseStartMonth()" style="border:1px solid var(--border);background:var(--surface);border-radius:6px;padding:4px 8px;font-size:11px;font-family:var(--font-body);color:var(--text);cursor:pointer;"></select>
+    <select id="phase-start-year" onchange="updatePhaseStartMonth()" style="border:1px solid var(--border);background:var(--surface);border-radius:6px;padding:4px 8px;font-size:11px;font-family:var(--font-body);color:var(--text);cursor:pointer;"></select>
+    <div style="flex:1;"></div>
+    <button class="btn btn-danger" onclick="deleteActivePhase()" style="font-size:11px;padding:4px 10px;">Delete phase</button>
+  </div>
+
+  <!-- Compact assumptions strip: hidden until "Edit Assumptions" is clicked -->
+  <div class="card" id="proj-assumptions-strip" style="margin-bottom:16px;display:none;">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+      <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--text3);">Assumptions</span>
+      <span style="font-size:10px;color:var(--text3);">Percentages &amp; settings not shown as line items below</span>
     </div>
-    <div class="card">
-      <div class="card-title">Projection Assumptions</div>
-      <div id="phase-header" style="display:none;margin-bottom:12px;padding:8px 10px;background:var(--surface2);border-radius:6px;align-items:center;gap:8px;flex-wrap:wrap;">
-        <span style="font-size:11px;font-weight:500;color:var(--text2);">Starts:</span>
-        <select id="phase-start-month" onchange="updatePhaseStartMonth()" style="border:1px solid var(--border);background:var(--surface);border-radius:6px;padding:4px 8px;font-size:11px;font-family:var(--font-body);color:var(--text);cursor:pointer;">
-        </select>
-        <select id="phase-start-year" onchange="updatePhaseStartMonth()" style="border:1px solid var(--border);background:var(--surface);border-radius:6px;padding:4px 8px;font-size:11px;font-family:var(--font-body);color:var(--text);cursor:pointer;">
-        </select>
-        <div style="flex:1;"></div>
-        <button class="btn btn-danger" onclick="deleteActivePhase()" style="font-size:11px;padding:4px 10px;">Delete phase</button>
-      </div>
-      <div class="form-section">
-        <div class="form-section-title">Income <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text3);font-size:10px;">(Annual)</span></div>
-        <div class="form-grid" style="grid-template-columns:1fr 1fr;">
-          <div class="form-group"><label>Nate's Income</label><input type="text" id="proj-inc1" value="$51,500" onfocus="projInputFocus(this)" onblur="projInputBlur(this)" oninput="renderProjection()"></div>
-          <div class="form-group"><label>Ally's Income</label><input type="text" id="proj-inc2" value="$38,400" onfocus="projInputFocus(this)" onblur="projInputBlur(this)" oninput="renderProjection()"></div>
+    <div class="form-grid" style="grid-template-columns:repeat(4,1fr);gap:12px 16px;">
+      <div class="form-group" style="margin:0;">
+        <label title="% of Nate's Income" style="cursor:default;">401(k) Personal %</label>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <input type="number" id="proj-401k-pct" value="5" step="0.5" min="0" max="100" oninput="renderProjection()" style="flex:1;">
+          <span style="font-size:11px;color:var(--text3);white-space:nowrap;" id="proj-401k-display">$214.58/mo</span>
         </div>
       </div>
-      <div class="form-section">
-        <div class="form-section-title">Savings <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text3);font-size:10px;">(Monthly)</span></div>
-
-        <!-- 401k row -->
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;align-items:start;padding:10px 0;">
-          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--text3);grid-column:1/-1;margin-bottom:2px;">401(k)</div>
-          <div class="form-group" style="margin:0;">
-            <label title="% of Nate's Income" style="cursor:default;">Personal %</label>
-            <div style="display:flex;align-items:center;gap:6px;">
-              <input type="number" id="proj-401k-pct" value="5" step="0.5" min="0" max="100" oninput="renderProjection()" style="flex:1;">
-              <span style="font-size:12px;color:var(--text3);white-space:nowrap;" id="proj-401k-display">$214.58/mo</span>
-            </div>
-            <div style="display:flex;align-items:center;gap:7px;margin-top:6px;">
-              <span style="font-size:11px;color:var(--text2);">Roth</span>
-              <div id="proj-401k-toggle" onclick="toggle401kType()" style="width:36px;height:20px;border-radius:10px;cursor:pointer;position:relative;background:var(--accent);transition:background 0.2s;flex-shrink:0;" title="Click to toggle Roth / Pre-tax">
-                <div id="proj-401k-knob" style="position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:white;transition:left 0.2s;"></div>
-              </div>
-              <span style="font-size:11px;color:var(--text2);">Pre-tax</span>
-              <span id="proj-401k-type-badge" style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:3px;background:var(--accent-bg);color:var(--accent);">Roth</span>
-            </div>
-            <input type="hidden" id="proj-401k-pretax" value="0">
-          </div>
-          <div class="form-group" style="margin:0;">
-            <label title="% of Nate's Income" style="cursor:default;">Employer Match %</label>
-            <div style="display:flex;align-items:center;gap:6px;">
-              <input type="number" id="proj-match401k-pct" value="4" step="0.5" min="0" max="100" oninput="renderProjection()" style="flex:1;">
-              <span style="font-size:12px;color:var(--text3);white-space:nowrap;" id="proj-match401k-display">$171.67/mo</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- HSA row -->
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;align-items:start;padding:10px 0;">
-          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--text3);grid-column:1/-1;margin-bottom:2px;">HSA</div>
-          <div class="form-group" style="margin:0;">
-            <label>Personal</label>
-            <input type="text" id="proj-hsa" value="$266.66" onfocus="projInputFocus(this)" onblur="projInputBlur(this)" oninput="renderProjection()">
-          </div>
-          <div class="form-group" style="margin:0;">
-            <label>Employer Match</label>
-            <input type="text" id="proj-matchhsa" value="$100" onfocus="projInputFocus(this)" onblur="projInputBlur(this)" oninput="renderProjection()">
-          </div>
-        </div>
-
-        <!-- Roth IRA row -->
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;align-items:start;padding:10px 0;">
-          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--text3);grid-column:1/-1;margin-bottom:2px;">Roth IRA</div>
-          <div class="form-group" style="margin:0;">
-            <label>Nate</label>
-            <input type="text" id="proj-roth-nate" value="$625" onfocus="projInputFocus(this)" onblur="projInputBlur(this)" oninput="renderProjection()">
-          </div>
-          <div class="form-group" style="margin:0;">
-            <label>Ally</label>
-            <input type="text" id="proj-roth-ally" value="$625" onfocus="projInputFocus(this)" onblur="projInputBlur(this)" oninput="renderProjection()">
-          </div>
+      <div class="form-group" style="margin:0;">
+        <label title="% of Nate's Income" style="cursor:default;">401(k) Match %</label>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <input type="number" id="proj-match401k-pct" value="4" step="0.5" min="0" max="100" oninput="renderProjection()" style="flex:1;">
+          <span style="font-size:11px;color:var(--text3);white-space:nowrap;" id="proj-match401k-display">$171.67/mo</span>
         </div>
       </div>
-      <div class="form-section">
-        <div class="form-section-title">Returns</div>
-        <div class="form-grid" style="grid-template-columns:1fr 1fr;">
-          <div class="form-group">
-            <label>Investment Return % /yr <span style="font-size:9px;color:var(--text3);font-weight:400;">(Roth, 401k, HSA)</span></label>
-            <input type="number" id="proj-return" value="8" step="0.1" min="0" max="30" oninput="renderBS();renderProjection();">
-          </div>
-          <div class="form-group">
-            <label>Cash Return % /yr <span style="font-size:9px;color:var(--text3);font-weight:400;">(E-Fund, Savings)</span></label>
-            <input type="number" id="proj-cash-return" value="2.0" step="0.1" min="0" max="20" oninput="renderProjection();">
-          </div>
-        </div>
-        <div style="font-size:11px;color:var(--text3);margin-top:8px;">Used by the Forecast tab and Balance Sheet goal projections.</div>
+      <div class="form-group" style="margin:0;">
+        <label>Tithing %</label>
+        <input type="number" id="proj-tithe" value="10.2" step="0.01" oninput="renderProjection()">
       </div>
-      <div class="form-section">
-        <div class="form-section-title">Expenses <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text3);font-size:10px;">(Monthly)</span></div>
-        <div class="form-grid" style="grid-template-columns:1fr;">
-          <div class="form-group"><label>Total Expenses</label><input type="text" id="p-expenses" value="$3,000" onfocus="projInputFocus(this)" onblur="projInputBlur(this)" oninput="renderProjection()"></div>
-        </div>
+      <div class="form-group" style="margin:0;">
+        <label>Payroll %</label>
+        <input type="number" id="proj-payroll" value="7.65" step="0.01" oninput="renderProjection()">
       </div>
-      <div class="form-section">
-        <div class="form-section-title">Tax Assumptions</div>
-        <div class="form-grid" style="grid-template-columns:1fr 1fr 1fr;">
-          <div class="form-group"><label>Payroll %</label><input type="number" id="proj-payroll" value="7.65" step="0.01" oninput="renderProjection()"></div>
-          <div class="form-group"><label>Utah State Tax</label><div style="padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;font-size:12px;color:var(--text2);font-family:var(--font-mono);">4.5% via TC-40</div></div>
-          <div class="form-group"><label>Tithing %</label><input type="number" id="proj-tithe" value="10.2" step="0.01" oninput="renderProjection()"></div>
-        </div>
-        <div style="margin-top:12px;">
-          <div class="form-grid" style="grid-template-columns:1fr 1fr 1fr;align-items:end;">
-            <div class="form-group">
-              <label>Qualifying Children</label>
-              <input type="number" id="proj-children" value="0" min="0" step="1" oninput="renderProjection()">
-            </div>
-            <div id="proj-ctc-display" style="padding:8px 10px;background:var(--accent-bg);border:1px solid #C5D9B0;border-radius:6px;font-size:12px;color:var(--accent);font-family:var(--font-mono);display:none;">
-              CTC: $0/yr saved
-            </div>
+      <div class="form-group" style="margin:0;">
+        <label>Investment Return % /yr</label>
+        <input type="number" id="proj-return" value="8" step="0.1" min="0" max="30" oninput="renderBS();renderProjection();">
+      </div>
+      <div class="form-group" style="margin:0;">
+        <label>Cash Return % /yr</label>
+        <input type="number" id="proj-cash-return" value="2.0" step="0.1" min="0" max="20" oninput="renderProjection();">
+      </div>
+      <div class="form-group" style="margin:0;">
+        <label>Qualifying Children</label>
+        <input type="number" id="proj-children" value="0" min="0" step="1" oninput="renderProjection()">
+      </div>
+      <div class="form-group" style="margin:0;">
+        <label>401(k) type</label>
+        <div style="display:flex;align-items:center;gap:7px;height:36px;">
+          <span style="font-size:11px;color:var(--text2);">Roth</span>
+          <div id="proj-401k-toggle" onclick="toggle401kType()" style="width:36px;height:20px;border-radius:10px;cursor:pointer;position:relative;background:var(--accent);transition:background 0.2s;flex-shrink:0;" title="Click to toggle Roth / Pre-tax">
+            <div id="proj-401k-knob" style="position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:white;transition:left 0.2s;"></div>
           </div>
-          <div style="font-size:11px;color:var(--text3);margin-top:8px;">Child Tax Credit: $2,200 per qualifying child (under 17). Phases out above $400,000 AGI for MFJ. Applied as a direct reduction to federal income tax.</div>
+          <span style="font-size:11px;color:var(--text2);">Pre-tax</span>
+          <span id="proj-401k-type-badge" style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:3px;background:var(--accent-bg);color:var(--accent);">Roth</span>
+          <input type="hidden" id="proj-401k-pretax" value="0">
         </div>
-        <div style="font-size:11px;color:var(--text3);margin-top:8px;">Utah state tax uses TC-40 credit/phase-out method: 4.5% flat rate minus taxpayer tax credit (6% of standard deduction, phased out at 1.3% above $36,426 for MFJ).</div>
       </div>
     </div>
+    <div id="proj-ctc-display" style="margin-top:8px;padding:6px 10px;background:var(--accent-bg);border:1px solid #C5D9B0;border-radius:6px;font-size:11px;color:var(--accent);font-family:var(--font-mono);display:none;">CTC: $0/yr saved</div>
+    <div style="font-size:10px;color:var(--text3);margin-top:8px;">Utah state tax uses the TC-40 method (4.5% flat rate minus the taxpayer tax credit). Return % and cash return feed the Forecast tab and goal projections. Child Tax Credit: $2,200 per qualifying child under 17.</div>
+  </div>
+
+  <!-- Full-width editable income statement -->
+  <div class="card" style="padding:0;overflow:hidden;margin-bottom:20px;">
+    <table class="fin-table" id="proj-table">
+      <thead><tr><th>Line Item</th><th>Monthly</th><th>Annual</th><th>% of Gross</th></tr></thead>
+      <tbody id="proj-tbody"></tbody>
+    </table>
+  </div>
+
+  <!-- Hidden source-of-truth inputs (edited inline in the table above) -->
+  <div style="display:none;" aria-hidden="true">
+    <input type="text" id="proj-inc1" value="$51,500">
+    <input type="text" id="proj-inc2" value="$38,400">
+    <input type="text" id="proj-hsa" value="$266.66">
+    <input type="text" id="proj-matchhsa" value="$100">
+    <input type="text" id="proj-roth-nate" value="$625">
+    <input type="text" id="proj-roth-ally" value="$625">
+    <input type="text" id="p-expenses" value="$3,000">
   </div>
 
   <div class="card" style="padding:0;overflow:hidden;">
@@ -4490,6 +4458,64 @@ function getProjAssumptions() {
   return { gross, s401k, m401k, sRoth, sRothNate, sRothAlly, sHSA, mHSA, surplusMo, personalSavingsMo, ctcAnnual, annualReturn };
 }
 
+// Show/hide the compact assumptions panel via the "Edit Assumptions" button.
+function toggleProjAssumptions() {
+  const strip = document.getElementById('proj-assumptions-strip');
+  const label = document.getElementById('proj-edit-assum-label');
+  if (!strip) return;
+  const open = strip.style.display !== 'none';
+  strip.style.display = open ? 'none' : 'block';
+  if (label) label.textContent = open ? 'Edit Assumptions' : 'Done';
+}
+
+// Inline editor for the projection income statement. Clicking a Monthly or Annual amount
+// turns it into an input; committing writes the value back to the hidden source-of-truth
+// input (converting to how that input stores it) and re-renders so the paired cell updates.
+//   storedUnit: how the hidden input stores the value ('annual' for incomes, 'monthly' otherwise)
+//   editedUnit: which column was clicked ('monthly' or 'annual')
+function projEditCell(cell, inputId, storedUnit, editedUnit) {
+  if (cell.querySelector('input')) return; // already editing
+  const hidden = document.getElementById(inputId);
+  if (!hidden) return;
+  const stored = parseFloat((hidden.value || '').replace(/[$,]/g, '')) || 0;
+  let cur;
+  if (storedUnit === editedUnit) cur = stored;
+  else if (storedUnit === 'annual' && editedUnit === 'monthly') cur = stored / 12;
+  else cur = stored * 12; // stored monthly, editing annual
+  const inp = document.createElement('input');
+  inp.type = 'text';
+  inp.value = cur.toFixed(2);
+  // Small in-place editor sized to the number (not the whole cell). ch units match the
+  // monospace font so the box hugs the digits; the cell's right-alignment keeps it in place.
+  const chWidth = Math.max(4, inp.value.length + 1);
+  inp.style.cssText = `width:${chWidth}ch;box-sizing:content-box;text-align:right;font-family:var(--font-mono);font-size:12px;line-height:inherit;padding:0 2px;margin:0;border:none;border-bottom:1px solid var(--blue);background:var(--blue-bg);color:var(--text);outline:none;`;
+  cell.innerHTML = '';
+  cell.appendChild(inp);
+  inp.focus();
+  inp.select();
+  let committed = false;
+  const commit = () => {
+    if (committed) return;
+    committed = true;
+    const v = parseFloat((inp.value || '').replace(/[$,]/g, ''));
+    if (!isNaN(v) && v >= 0) {
+      let toStore;
+      if (storedUnit === editedUnit) toStore = v;
+      else if (storedUnit === 'annual' && editedUnit === 'monthly') toStore = v * 12;
+      else toStore = v / 12; // editing annual, stored monthly
+      hidden.value = String(toStore);
+      if (typeof captureCurrentInputs === 'function') captureCurrentInputs();
+    }
+    renderProjection();
+    if (typeof renderForecast === 'function') renderForecast();
+  };
+  inp.addEventListener('blur', commit);
+  inp.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); inp.blur(); }
+    else if (e.key === 'Escape') { committed = true; renderProjection(); }
+  });
+}
+
 function renderProjection() {
   // Save current inputs to the active scenario on every render
   if (typeof captureCurrentInputs === 'function') captureCurrentInputs();
@@ -4583,35 +4609,42 @@ function renderProjection() {
   `;
 
   const r = (mo) => `<td>${fmt(mo)}</td><td>${fmt(mo*12)}</td><td style="color:var(--text3)">${fmtPct(gross?mo*12/gross:0)}</td>`;
+  // Editable amount cells: clicking Monthly or Annual opens an inline editor that writes back
+  // to the hidden source-of-truth input (storedUnit tells us how that input stores the value).
+  const rEdit = (mo, inputId, storedUnit) =>
+    `<td class="proj-edit-cell" onclick="projEditCell(this,'${inputId}','${storedUnit}','monthly')"><span class="proj-edit-val">${fmt(mo)}</span></td>` +
+    `<td class="proj-edit-cell" onclick="projEditCell(this,'${inputId}','${storedUnit}','annual')"><span class="proj-edit-val">${fmt(mo*12)}</span></td>` +
+    `<td style="color:var(--text3)">${fmtPct(gross?mo*12/gross:0)}</td>`;
   const rows = [];
   const addRow = (label, mo, indent=false) => rows.push(`<tr><td class="${indent?'indent':''}">${label}</td>${r(mo)}</tr>`);
+  const addEditRow = (label, mo, inputId, storedUnit, indent=true) => rows.push(`<tr><td class="${indent?'indent':''}">${label}</td>${rEdit(mo, inputId, storedUnit)}</tr>`);
   const addTotal = (label, mo) => rows.push(`<tr class="subtotal"><td>${label}</td>${r(mo)}</tr>`);
   const addSect = (label) => rows.push(`<tr class="section-header"><td colspan="4">${label}</td></tr>`);
   const addKeyRow = (label, mo) => rows.push(`<tr class="is-key-row"><td><strong>${label}</strong></td><td><strong>${fmt(mo)}</strong></td><td><strong>${fmt(mo*12)}</strong></td><td></td></tr>`);
   const addFinalRow = (label, mo) => rows.push(`<tr class="total-row"><td>${label}</td>${r(mo)}</tr>`);
 
   addSect('INCOME');
-  addRow("Nate's Income", inc1/12, true);
-  addRow("Ally's Income", inc2/12, true);
+  addEditRow("Nate's Income", inc1/12, 'proj-inc1', 'annual');
+  addEditRow("Ally's Income", inc2/12, 'proj-inc2', 'annual');
   addTotal('Gross Income', grossMo);
   addRow('Taxes', totalTaxMo, true);
   addRow('  — Federal', fedTaxMo, true);
   addRow('  — State', stateTaxMo, true);
   addRow('  — Payroll', payrollTaxMo, true);
   addTotal('Net Income', netMo);
-  addRow('Tithing', titheMo, true);
+  addRow(`Tithing <span style="font-size:10px;color:var(--text3);">(${(tithePct*100).toFixed(2).replace(/\.?0+$/,'')}%)</span>`, titheMo, true);
   addSect('SAVINGS');
-  addRow('Roth IRA — Nate', sRothNate, true);
-  addRow('Roth IRA — Ally', sRothAlly, true);
-  addRow('HSA Personal', sHSA, true);
-  addRow('401(k) Personal', s401k, true);
+  addEditRow('Roth IRA — Nate', sRothNate, 'proj-roth-nate', 'monthly');
+  addEditRow('Roth IRA — Ally', sRothAlly, 'proj-roth-ally', 'monthly');
+  addEditRow('HSA Personal', sHSA, 'proj-hsa', 'monthly');
+  addRow(`401(k) Personal <span style="font-size:10px;color:var(--text3);">(${(s401kPct*100).toFixed(2).replace(/\.?0+$/,'')}%)</span>`, s401k, true);
   addTotal('Personal Savings', personalSavingsMo);
-  addRow('HSA', mHSA, true);
-  addRow('401(k) Pre-tax', m401k, true);
+  addEditRow('HSA', mHSA, 'proj-matchhsa', 'monthly');
+  addRow(`401(k) Pre-tax <span style="font-size:10px;color:var(--text3);">(${(m401kPct*100).toFixed(2).replace(/\.?0+$/,'')}%)</span>`, m401k, true);
   addTotal('Total w/ Match', totalSavingsMo);
   addKeyRow('Income for Living', incomeForLivingMo);
   addSect('EXPENSES');
-  addRow('Total Expenses', totalExpMo, true);
+  addEditRow('Total Expenses', totalExpMo, 'p-expenses', 'monthly');
   addFinalRow('REMAINING SURPLUS', remainingMo);
   document.getElementById('proj-tbody').innerHTML = rows.join('');
 
