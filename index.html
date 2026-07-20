@@ -1181,60 +1181,79 @@
 
   <!-- Compact assumptions strip: hidden until "Edit Assumptions" is clicked -->
   <div class="card" id="proj-assumptions-strip" style="margin-bottom:16px;display:none;">
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">
       <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--text3);">Assumptions</span>
       <span style="font-size:10px;color:var(--text3);">Percentages &amp; settings not shown as line items below</span>
     </div>
-    <div class="form-grid" style="grid-template-columns:repeat(4,1fr);gap:12px 16px;">
-      <div class="form-group" style="margin:0;">
-        <label title="% of Nate's Income" style="cursor:default;">401(k) Personal %</label>
-        <div style="display:flex;align-items:center;gap:6px;">
-          <input type="number" id="proj-401k-pct" value="5" step="0.5" min="0" max="100" oninput="renderProjection()" style="flex:1;">
-          <span style="font-size:11px;color:var(--text3);white-space:nowrap;" id="proj-401k-display">$214.58/mo</span>
-        </div>
-      </div>
-      <div class="form-group" style="margin:0;">
-        <label title="% of Nate's Income" style="cursor:default;">401(k) Match %</label>
-        <div style="display:flex;align-items:center;gap:6px;">
-          <input type="number" id="proj-match401k-pct" value="4" step="0.5" min="0" max="100" oninput="renderProjection()" style="flex:1;">
-          <span style="font-size:11px;color:var(--text3);white-space:nowrap;" id="proj-match401k-display">$171.67/mo</span>
-        </div>
-      </div>
-      <div class="form-group" style="margin:0;">
-        <label>Tithing %</label>
-        <input type="number" id="proj-tithe" value="10.2" step="0.01" oninput="renderProjection()">
-      </div>
-      <div class="form-group" style="margin:0;">
-        <label>Payroll %</label>
-        <input type="number" id="proj-payroll" value="7.65" step="0.01" oninput="renderProjection()">
-      </div>
-      <div class="form-group" style="margin:0;">
-        <label>Investment Return % /yr</label>
-        <input type="number" id="proj-return" value="8" step="0.1" min="0" max="30" oninput="renderBS();renderProjection();">
-      </div>
-      <div class="form-group" style="margin:0;">
-        <label>Cash Return % /yr</label>
-        <input type="number" id="proj-cash-return" value="2.0" step="0.1" min="0" max="20" oninput="renderProjection();">
-      </div>
-      <div class="form-group" style="margin:0;">
-        <label>Qualifying Children</label>
-        <input type="number" id="proj-children" value="0" min="0" step="1" oninput="renderProjection()">
-      </div>
-      <div class="form-group" style="margin:0;">
-        <label>401(k) type</label>
-        <div style="display:flex;align-items:center;gap:7px;height:36px;">
-          <span style="font-size:11px;color:var(--text2);">Roth</span>
-          <div id="proj-401k-toggle" onclick="toggle401kType()" style="width:36px;height:20px;border-radius:10px;cursor:pointer;position:relative;background:var(--accent);transition:background 0.2s;flex-shrink:0;" title="Click to toggle Roth / Pre-tax">
-            <div id="proj-401k-knob" style="position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:white;transition:left 0.2s;"></div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+
+      <!-- 401(k) group -->
+      <div style="border:1px solid var(--border);border-radius:10px;padding:14px;background:var(--surface);">
+        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--accent);margin-bottom:12px;">401(k)</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+          <div class="form-group" style="margin:0;">
+            <label title="% of Nate's Income" style="cursor:default;">Personal %</label>
+            <input type="number" id="proj-401k-pct" value="5" step="0.5" min="0" max="100" oninput="renderProjection()">
+            <div style="font-size:10px;color:var(--text3);font-family:var(--font-mono);margin-top:3px;" id="proj-401k-display">$214.58/mo</div>
           </div>
-          <span style="font-size:11px;color:var(--text2);">Pre-tax</span>
-          <span id="proj-401k-type-badge" style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:3px;background:var(--accent-bg);color:var(--accent);">Roth</span>
-          <input type="hidden" id="proj-401k-pretax" value="0">
+          <div class="form-group" style="margin:0;">
+            <label title="% of Nate's Income" style="cursor:default;">Match %</label>
+            <input type="number" id="proj-match401k-pct" value="4" step="0.5" min="0" max="100" oninput="renderProjection()">
+            <div style="font-size:10px;color:var(--text3);font-family:var(--font-mono);margin-top:3px;" id="proj-match401k-display">$171.67/mo</div>
+          </div>
+        </div>
+        <label style="font-size:11px;color:var(--text2);display:block;margin-bottom:4px;">Contribution type</label>
+        <div style="display:inline-flex;border:1px solid var(--border);border-radius:7px;overflow:hidden;">
+          <button type="button" id="proj-401k-roth-btn" onclick="set401kType(false)" style="border:none;background:var(--accent);color:#fff;font-size:12px;padding:6px 16px;font-weight:500;cursor:pointer;font-family:var(--font-body);">Roth</button>
+          <button type="button" id="proj-401k-pretax-btn" onclick="set401kType(true)" style="border:none;background:var(--surface);color:var(--text2);font-size:12px;padding:6px 16px;cursor:pointer;font-family:var(--font-body);">Pre-tax</button>
+        </div>
+        <input type="hidden" id="proj-401k-pretax" value="0">
+      </div>
+
+      <!-- Growth Rates group -->
+      <div style="border:1px solid var(--border);border-radius:10px;padding:14px;background:var(--surface);">
+        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--accent);margin-bottom:12px;">Growth Rates</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+          <div class="form-group" style="margin:0;">
+            <label>Investment % /yr</label>
+            <input type="number" id="proj-return" value="8" step="0.1" min="0" max="30" oninput="renderBS();renderProjection();">
+          </div>
+          <div class="form-group" style="margin:0;">
+            <label>Cash % /yr</label>
+            <input type="number" id="proj-cash-return" value="2.0" step="0.1" min="0" max="20" oninput="renderProjection();">
+          </div>
         </div>
       </div>
+
+      <!-- Taxes group -->
+      <div style="border:1px solid var(--border);border-radius:10px;padding:14px;background:var(--surface);">
+        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--accent);margin-bottom:12px;">Taxes</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+          <div class="form-group" style="margin:0;">
+            <label>Payroll %</label>
+            <input type="number" id="proj-payroll" value="7.65" step="0.01" oninput="renderProjection()">
+          </div>
+          <div class="form-group" style="margin:0;">
+            <label>Children</label>
+            <input type="number" id="proj-children" value="0" min="0" step="1" oninput="renderProjection()">
+          </div>
+        </div>
+      </div>
+
+      <!-- Giving group -->
+      <div style="border:1px solid var(--border);border-radius:10px;padding:14px;background:var(--surface);">
+        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--accent);margin-bottom:12px;">Giving</div>
+        <div class="form-group" style="margin:0;">
+          <label>Tithing %</label>
+          <input type="number" id="proj-tithe" value="10.2" step="0.01" oninput="renderProjection()" style="max-width:110px;">
+        </div>
+      </div>
+
     </div>
-    <div id="proj-ctc-display" style="margin-top:8px;padding:6px 10px;background:var(--accent-bg);border:1px solid #C5D9B0;border-radius:6px;font-size:11px;color:var(--accent);font-family:var(--font-mono);display:none;">CTC: $0/yr saved</div>
-    <div style="font-size:10px;color:var(--text3);margin-top:8px;">Utah state tax uses the TC-40 method (4.5% flat rate minus the taxpayer tax credit). Return % and cash return feed the Forecast tab and goal projections. Child Tax Credit: $2,200 per qualifying child under 17.</div>
+
+    <div id="proj-ctc-display" style="margin-top:12px;padding:6px 10px;background:var(--accent-bg);border:1px solid #C5D9B0;border-radius:6px;font-size:11px;color:var(--accent);font-family:var(--font-mono);display:none;">CTC: $0/yr saved</div>
+    <div style="font-size:10px;color:var(--text3);margin-top:10px;">Utah state tax uses the TC-40 method (4.5% flat rate minus the taxpayer tax credit). Return % and cash return feed the Forecast tab and goal projections. Child Tax Credit: $2,200 per qualifying child under 17.</div>
   </div>
 
   <!-- Full-width editable income statement -->
@@ -4634,13 +4653,13 @@ function renderProjection() {
   addTotal('Net Income', netMo);
   addRow(`Tithing <span style="font-size:10px;color:var(--text3);">(${(tithePct*100).toFixed(2).replace(/\.?0+$/,'')}%)</span>`, titheMo, true);
   addSect('SAVINGS');
-  addEditRow('Roth IRA — Nate', sRothNate, 'proj-roth-nate', 'monthly');
-  addEditRow('Roth IRA — Ally', sRothAlly, 'proj-roth-ally', 'monthly');
-  addEditRow('HSA Personal', sHSA, 'proj-hsa', 'monthly');
-  addRow(`401(k) Personal <span style="font-size:10px;color:var(--text3);">(${(s401kPct*100).toFixed(2).replace(/\.?0+$/,'')}%)</span>`, s401k, true);
+  addEditRow("Nate's Roth IRA", sRothNate, 'proj-roth-nate', 'monthly');
+  addEditRow("Ally's Roth IRA", sRothAlly, 'proj-roth-ally', 'monthly');
+  addEditRow('HSA', sHSA, 'proj-hsa', 'monthly');
+  addRow(`401k ${is401kPretax ? 'Pre-tax' : 'Roth'} <span style="font-size:10px;color:var(--text3);">(${(s401kPct*100).toFixed(2).replace(/\.?0+$/,'')}%)</span>`, s401k, true);
   addTotal('Personal Savings', personalSavingsMo);
-  addEditRow('HSA', mHSA, 'proj-matchhsa', 'monthly');
-  addRow(`401(k) Pre-tax <span style="font-size:10px;color:var(--text3);">(${(m401kPct*100).toFixed(2).replace(/\.?0+$/,'')}%)</span>`, m401k, true);
+  addEditRow('HSA Match', mHSA, 'proj-matchhsa', 'monthly');
+  addRow(`401(k) Match Pre-tax <span style="font-size:10px;color:var(--text3);">(${(m401kPct*100).toFixed(2).replace(/\.?0+$/,'')}%)</span>`, m401k, true);
   addTotal('Total w/ Match', totalSavingsMo);
   addKeyRow('Income for Living', incomeForLivingMo);
   addSect('EXPENSES');
@@ -5118,31 +5137,41 @@ function cancelRename() {
 
 function sync401kToggleUI() {
   const isPretax = document.getElementById('proj-401k-pretax')?.value === '1';
-  const toggle = document.getElementById('proj-401k-toggle');
-  const knob   = document.getElementById('proj-401k-knob');
-  const badge  = document.getElementById('proj-401k-type-badge');
-  if (!toggle || !knob || !badge) return;
+  const rothBtn   = document.getElementById('proj-401k-roth-btn');
+  const pretaxBtn = document.getElementById('proj-401k-pretax-btn');
+  if (!rothBtn || !pretaxBtn) return;
+  // Highlight the active segment
   if (isPretax) {
-    toggle.style.background = 'var(--blue)';
-    knob.style.left = '18px';
-    badge.textContent = 'Pre-tax';
-    badge.style.background = 'var(--blue-bg)';
-    badge.style.color = 'var(--blue)';
+    pretaxBtn.style.background = 'var(--blue)';
+    pretaxBtn.style.color = '#fff';
+    pretaxBtn.style.fontWeight = '500';
+    rothBtn.style.background = 'var(--surface)';
+    rothBtn.style.color = 'var(--text2)';
+    rothBtn.style.fontWeight = '400';
   } else {
-    toggle.style.background = 'var(--accent)';
-    knob.style.left = '2px';
-    badge.textContent = 'Roth';
-    badge.style.background = 'var(--accent-bg)';
-    badge.style.color = 'var(--accent)';
+    rothBtn.style.background = 'var(--accent)';
+    rothBtn.style.color = '#fff';
+    rothBtn.style.fontWeight = '500';
+    pretaxBtn.style.background = 'var(--surface)';
+    pretaxBtn.style.color = 'var(--text2)';
+    pretaxBtn.style.fontWeight = '400';
   }
+}
+
+// Set 401(k) contribution type from the segmented control (false = Roth, true = Pre-tax).
+function set401kType(isPretax) {
+  const el = document.getElementById('proj-401k-pretax');
+  if (!el) return;
+  el.value = isPretax ? '1' : '0';
+  sync401kToggleUI();
+  if (typeof captureCurrentInputs === 'function') captureCurrentInputs();
+  renderProjection();
 }
 
 function toggle401kType() {
   const el = document.getElementById('proj-401k-pretax');
   if (!el) return;
-  el.value = el.value === '1' ? '0' : '1';
-  sync401kToggleUI();
-  renderProjection();
+  set401kType(el.value !== '1');
 }
 
 function updateCopyEventsDropdown() {
