@@ -6458,9 +6458,14 @@ function renderTxTable(txs) {
   const subStyle = `font-size:13px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`;
   const txnStyle = `font-size:12px;color:var(--text3);text-align:left;white-space:nowrap;`;
   // Standard editable-cell wrapper: dashed underline, click to edit the underlying field
-  const editSpan = (i, field, val, extraStyle='') =>
-    `<span onclick="txEditField(this,${i},'${field}')" title="Click to edit"
-       style="cursor:text;border-bottom:1px dashed var(--border);padding-bottom:1px;display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${extraStyle}">${val || '—'}</span>`;
+  const editSpan = (i, field, val, extraStyle='') => {
+    const isDate = field === 'date';
+    const handler = isDate ? `txEditDate(this,${i})` : `txEditField(this,${i},'${field}')`;
+    const title   = isDate ? 'Click to pick a date' : 'Click to edit';
+    const cursor  = isDate ? 'pointer' : 'text';
+    return `<span onclick="${handler}" title="${title}"
+       style="cursor:${cursor};border-bottom:1px dashed var(--border);padding-bottom:1px;display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${extraStyle}">${val || '—'}</span>`;
+  };
 
   const sectionHeader = (label) =>
     `<tr style="background:var(--surface2);">
@@ -6752,6 +6757,200 @@ function txEditField(span, i, field) {
     if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
     if (e.key === 'Escape') { done = true; renderTxTable(loadData().transactions[currentEntryKey] || []); }
   });
+}
+
+// ---- Transaction date picker (Style B: month grid + month/year jump + Today/Clear) ----
+// Opens a floating calendar anchored under the clicked date cell. Writes back MM/DD/YYYY
+// (the format the rest of the dashboard parses). Defaults its view to the transaction's
+// existing date, else the currently selected entry month, else today.
+const DP_MONTHS = ['January','February','March','April','May','June',
+                   'July','August','September','October','November','December'];
+const DP_MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+// One-time scoped stylesheet for hover/active states (inline styles can't do :hover).
+function dpEnsureStyle() {
+  if (document.getElementById('dp-style')) return;
+  const s = document.createElement('style');
+  s.id = 'dp-style';
+  s.textContent =
+    '#tx-datepicker .dp-day:hover{background:var(--accent-bg);}' +
+    '#tx-datepicker .dp-day.dp-sel{background:var(--accent);color:#fff;font-weight:500;}' +
+    '#tx-datepicker .dp-day.dp-sel:hover{background:var(--accent);}' +
+    '#tx-datepicker .dp-nav:hover,#tx-datepicker .dp-mlabel:hover{background:var(--surface2);color:var(--accent);}' +
+    '#tx-datepicker .dp-jump:hover{background:var(--accent-bg);}' +
+    '#tx-datepicker .dp-jump.dp-jsel{background:var(--accent);color:#fff;}' +
+    '#tx-datepicker .dp-today:hover{background:var(--accent-bg);}' +
+    '#tx-datepicker .dp-clear:hover{background:var(--surface2);color:var(--red);}';
+  document.head.appendChild(s);
+}
+
+function txEditDate(span, i) {
+  // Only one picker open at a time
+  const existing = document.getElementById('tx-datepicker');
+  if (existing) existing.remove();
+
+  const data = loadData();
+  if (!data.transactions[currentEntryKey]) return;
+  const tx = data.transactions[currentEntryKey][i];
+  if (!tx) return;
+
+  dpEnsureStyle();
+
+  // Parse current value (MM/DD/YYYY) into the selected date, if any
+  let sel = null;
+  const mdy = (tx.date || '').trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (mdy) sel = { y: +mdy[3], m: +mdy[1], d: +mdy[2] };
+
+  // Initial view month/year: selected date → entry month → today
+  let viewY, viewM;
+  if (sel) { viewY = sel.y; viewM = sel.m; }
+  else {
+    const ek = (currentEntryKey || '').split('-');
+    if (ek.length === 2 && ek[0] && ek[1]) { viewY = +ek[0]; viewM = +ek[1]; }
+    else { const t = new Date(); viewY = t.getFullYear(); viewM = t.getMonth() + 1; }
+  }
+  let jumpY = viewY;          // year shown in the month/year jump views
+  let mode = 'days';          // 'days' | 'months' | 'years'
+
+  const pop = document.createElement('div');
+  pop.id = 'tx-datepicker';
+  pop.style.cssText = 'position:absolute;z-index:9999;width:250px;background:var(--surface);' +
+    'border:0.5px solid var(--border);border-radius:10px;box-shadow:0 8px 24px rgba(26,23,20,.14);' +
+    'overflow:hidden;font-family:var(--font-body);';
+  document.body.appendChild(pop);
+
+  // Position below the clicked cell, clamped to the viewport
+  const r = span.getBoundingClientRect();
+  let left = r.left + window.scrollX;
+  const maxLeft = window.scrollX + document.documentElement.clientWidth - 258;
+  if (left > maxLeft) left = Math.max(window.scrollX + 8, maxLeft);
+  pop.style.top  = (r.bottom + window.scrollY + 4) + 'px';
+  pop.style.left = left + 'px';
+
+  const navBtn  = 'width:26px;height:26px;border-radius:6px;border:0.5px solid var(--border);' +
+    'background:var(--surface);color:var(--text2);cursor:pointer;font-size:15px;line-height:1;' +
+    'display:flex;align-items:center;justify-content:center;';
+  const headWrap = 'display:flex;align-items:center;justify-content:space-between;' +
+    'padding:10px 12px;border-bottom:0.5px solid var(--border);';
+  const footWrap = 'display:flex;justify-content:space-between;align-items:center;' +
+    'padding:8px 12px;border-top:0.5px solid var(--border);';
+  const footBtn  = 'font-family:var(--font-body);font-size:11px;background:none;border:none;' +
+    'cursor:pointer;padding:4px 8px;border-radius:6px;';
+
+  function close() {
+    document.removeEventListener('mousedown', onDoc, true);
+    document.removeEventListener('keydown', onKey, true);
+    if (pop.parentNode) pop.remove();
+  }
+  function onDoc(e) { if (!pop.contains(e.target)) close(); }
+  function onKey(e) { if (e.key === 'Escape') close(); }
+  // Defer so the opening click doesn't immediately dismiss the popover
+  setTimeout(() => {
+    document.addEventListener('mousedown', onDoc, true);
+    document.addEventListener('keydown', onKey, true);
+  }, 0);
+
+  function commit(y, m, d) {
+    const d2 = loadData();
+    if (d2.transactions[currentEntryKey] && d2.transactions[currentEntryKey][i]) {
+      d2.transactions[currentEntryKey][i].date =
+        (d == null) ? '' : `${String(m).padStart(2,'0')}/${String(d).padStart(2,'0')}/${y}`;
+      saveData(d2);
+    }
+    close();
+    renderTxTable(loadData().transactions[currentEntryKey] || []);
+  }
+
+  function render() {
+    if (mode === 'days')   return renderDays();
+    if (mode === 'months') return renderMonths();
+    return renderYears();
+  }
+
+  function renderDays() {
+    const firstDow = new Date(viewY, viewM - 1, 1).getDay();  // 0=Sun
+    const dim      = new Date(viewY, viewM, 0).getDate();      // days in this month
+    const t = new Date();
+    const tY = t.getFullYear(), tM = t.getMonth() + 1, tD = t.getDate();
+
+    let cells = '';
+    ['S','M','T','W','T','F','S'].forEach(w =>
+      cells += `<div style="font-size:10px;color:var(--text3);text-align:center;padding:3px 0;font-weight:500;">${w}</div>`);
+    for (let k = 0; k < firstDow; k++)
+      cells += '<div></div>';
+    for (let d = 1; d <= dim; d++) {
+      const isToday = (viewY === tY && viewM === tM && d === tD);
+      const isSel   = (sel && sel.y === viewY && sel.m === viewM && sel.d === d);
+      let st = 'font-family:var(--font-mono);font-size:12px;text-align:center;padding:6px 0;' +
+               'border-radius:6px;cursor:pointer;color:var(--text);';
+      if (isToday && !isSel) st += 'box-shadow:inset 0 0 0 1.5px var(--accent-light);color:var(--accent);font-weight:500;';
+      cells += `<div class="dp-day${isSel ? ' dp-sel' : ''}" data-d="${d}" style="${st}">${d}</div>`;
+    }
+
+    pop.innerHTML =
+      `<div style="${headWrap}">
+        <button class="dp-nav" data-act="prev" style="${navBtn}" aria-label="Previous month">‹</button>
+        <button class="dp-mlabel" style="font-family:var(--font-body);font-weight:500;font-size:13px;color:var(--text);background:none;border:none;cursor:pointer;padding:4px 8px;border-radius:6px;">${DP_MONTHS[viewM-1]} ${viewY} ▾</button>
+        <button class="dp-nav" data-act="next" style="${navBtn}" aria-label="Next month">›</button>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;padding:8px 10px 10px;">${cells}</div>
+      <div style="${footWrap}">
+        <button class="dp-today" style="${footBtn}color:var(--accent);font-weight:500;">Today</button>
+        <button class="dp-clear" style="${footBtn}color:var(--text3);">Clear</button>
+      </div>`;
+
+    pop.querySelector('[data-act="prev"]').onclick = () => { viewM--; if (viewM < 1) { viewM = 12; viewY--; } render(); };
+    pop.querySelector('[data-act="next"]').onclick = () => { viewM++; if (viewM > 12) { viewM = 1; viewY++; } render(); };
+    pop.querySelector('.dp-mlabel').onclick = () => { jumpY = viewY; mode = 'months'; render(); };
+    pop.querySelector('.dp-today').onclick = () => { const n = new Date(); commit(n.getFullYear(), n.getMonth() + 1, n.getDate()); };
+    pop.querySelector('.dp-clear').onclick = () => commit(viewY, viewM, null);
+    pop.querySelectorAll('.dp-day').forEach(el =>
+      el.onclick = () => commit(viewY, viewM, +el.dataset.d));
+  }
+
+  function renderMonths() {
+    let cells = '';
+    for (let m = 1; m <= 12; m++) {
+      const isSel = (m === viewM && jumpY === viewY);
+      cells += `<div class="dp-jump${isSel ? ' dp-jsel' : ''}" data-m="${m}" style="text-align:center;padding:11px 0;border-radius:6px;cursor:pointer;font-size:12px;color:var(--text);">${DP_MONTHS_SHORT[m-1]}</div>`;
+    }
+    pop.innerHTML =
+      `<div style="${headWrap}">
+        <button class="dp-nav" data-act="py" style="${navBtn}" aria-label="Previous year">‹</button>
+        <button class="dp-mlabel" data-act="years" style="font-family:var(--font-body);font-weight:500;font-size:13px;color:var(--text);background:none;border:none;cursor:pointer;padding:4px 8px;border-radius:6px;">${jumpY} ▾</button>
+        <button class="dp-nav" data-act="ny" style="${navBtn}" aria-label="Next year">›</button>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px;padding:10px;">${cells}</div>`;
+
+    pop.querySelector('[data-act="py"]').onclick = () => { jumpY--; render(); };
+    pop.querySelector('[data-act="ny"]').onclick = () => { jumpY++; render(); };
+    pop.querySelector('[data-act="years"]').onclick = () => { mode = 'years'; render(); };
+    pop.querySelectorAll('.dp-jump').forEach(el =>
+      el.onclick = () => { viewM = +el.dataset.m; viewY = jumpY; mode = 'days'; render(); });
+  }
+
+  function renderYears() {
+    const start = jumpY - 6;
+    let cells = '';
+    for (let y = start; y < start + 12; y++) {
+      const isSel = (y === viewY);
+      cells += `<div class="dp-jump${isSel ? ' dp-jsel' : ''}" data-y="${y}" style="text-align:center;padding:11px 0;border-radius:6px;cursor:pointer;font-family:var(--font-mono);font-size:12px;color:var(--text);">${y}</div>`;
+    }
+    pop.innerHTML =
+      `<div style="${headWrap}">
+        <button class="dp-nav" data-act="pd" style="${navBtn}" aria-label="Earlier years">‹</button>
+        <span style="font-family:var(--font-body);font-weight:500;font-size:13px;color:var(--text2);">${start}–${start+11}</span>
+        <button class="dp-nav" data-act="nd" style="${navBtn}" aria-label="Later years">›</button>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px;padding:10px;">${cells}</div>`;
+
+    pop.querySelector('[data-act="pd"]').onclick = () => { jumpY -= 12; render(); };
+    pop.querySelector('[data-act="nd"]').onclick = () => { jumpY += 12; render(); };
+    pop.querySelectorAll('.dp-jump').forEach(el =>
+      el.onclick = () => { jumpY = +el.dataset.y; mode = 'months'; render(); });
+  }
+
+  render();
 }
 
 // Category editor for Income/Taxes/Tithing rows: dropdown from TX_CATEGORIES for the row's type.
