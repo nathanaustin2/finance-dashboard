@@ -1479,15 +1479,16 @@
     <div class="card" style="padding:0;overflow:hidden;">
       <table class="fin-table" id="tx-table" style="table-layout:fixed;width:100%;">
         <colgroup>
-          <col style="width:28px;">
-          <col style="width:140px;">
-          <col>
-          <col style="width:180px;">
-          <col style="width:100px;">
-          <col style="width:110px;">
-          <col style="width:34px;">
+          <col style="width:24px;">   <!-- chevron -->
+          <col style="width:160px;">  <!-- Category -->
+          <col style="width:150px;">  <!-- Subcategory -->
+          <col>                        <!-- Description -->
+          <col style="width:88px;">   <!-- Misc. -->
+          <col style="width:86px;">   <!-- Date -->
+          <col style="width:104px;">  <!-- Amount -->
+          <col style="width:32px;">   <!-- Delete -->
         </colgroup>
-        <thead><tr><td colspan="7" style="padding:0;height:0;border:none;"></td></tr></thead>
+        <thead><tr><td colspan="8" style="padding:0;height:0;border:none;"></td></tr></thead>
         <tbody id="tx-tbody"></tbody>
       </table>
     </div>
@@ -6422,13 +6423,15 @@ function renderTxTable(txs) {
     const inpStyle   = 'border:1px solid var(--border);border-radius:4px;padding:4px 6px;font-size:12px;font-family:var(--font-body);background:var(--surface);color:var(--text);';
     return `<tr style="background:var(--surface);border-left:3px solid var(--accent);">
       <td></td>
-      <td colspan="3" style="padding:8px 12px;">
+      <td colspan="5" style="padding:8px 12px;">
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-          <select onchange="updatePending(${pi},'type',this.value)" style="${inpStyle}width:110px;">${typeOpts}</select>
-          <select onchange="updatePending(${pi},'category',this.value)" style="${inpStyle}width:150px;">${catOpts}</select>
-          <select onchange="updatePending(${pi},'subcategory',this.value)" style="${inpStyle}width:140px;"><option value="">—</option>${subOpts}</select>
-          <input type="text" value="${row.notes||''}" placeholder="Notes" oninput="updatePending(${pi},'notes',this.value)"
-            style="${inpStyle}width:120px;">
+          <select onchange="updatePending(${pi},'type',this.value)" style="${inpStyle}width:105px;">${typeOpts}</select>
+          <select onchange="updatePending(${pi},'category',this.value)" style="${inpStyle}width:145px;">${catOpts}</select>
+          <select onchange="updatePending(${pi},'subcategory',this.value)" style="${inpStyle}width:135px;"><option value="">—</option>${subOpts}</select>
+          <input type="text" value="${row.notes||''}" placeholder="Description" oninput="updatePending(${pi},'notes',this.value)"
+            style="${inpStyle}width:130px;">
+          <input type="text" value="${row.date||''}" placeholder="Date" oninput="updatePending(${pi},'date',this.value)"
+            style="${inpStyle}width:88px;">
         </div>
       </td>
       <td style="text-align:right;padding:8px 12px;">
@@ -6447,18 +6450,22 @@ function renderTxTable(txs) {
   }).join('');
 
   if (pendingHtml) {
-    rows.push(`<tr style="background:var(--accent-bg);"><td colspan="7" style="padding:5px 12px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--accent);border-left:3px solid var(--accent);">New — pending</td></tr>`);
+    rows.push(`<tr style="background:var(--accent-bg);"><td colspan="8" style="padding:5px 12px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--accent);border-left:3px solid var(--accent);">New — pending</td></tr>`);
     rows.push(pendingHtml);
   }
 
   const catStyle = `font-size:12px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`;
   const subStyle = `font-size:13px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`;
   const txnStyle = `font-size:12px;color:var(--text3);text-align:left;white-space:nowrap;`;
+  // Standard editable-cell wrapper: dashed underline, click to edit the underlying field
+  const editSpan = (i, field, val, extraStyle='') =>
+    `<span onclick="txEditField(this,${i},'${field}')" title="Click to edit"
+       style="cursor:text;border-bottom:1px dashed var(--border);padding-bottom:1px;display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${extraStyle}">${val || '—'}</span>`;
 
   const sectionHeader = (label) =>
     `<tr style="background:var(--surface2);">
       <td style="padding:6px 12px;"></td>
-      <td colspan="6" style="padding:6px 12px;font-size:11px;font-weight:700;
+      <td colspan="7" style="padding:6px 12px;font-size:11px;font-weight:700;
         text-transform:uppercase;letter-spacing:0.06em;color:var(--text);
         font-family:var(--font-body);">${label}</td>
     </tr>`;
@@ -6484,13 +6491,12 @@ function renderTxTable(txs) {
                    : tx.type === 'Tithing'  ? 'tx-tithing'
                    : '';
       const amt = parseFloat(tx.amount) || 0;
-      let catLabel, subLabel;
-      // Tax-year dropdown (only for Roth contributions)
+      // Standard columns: Category | Subcategory | Description | Misc. | Date | Amount
+      let catLabel, subLabel, descVal, miscHtml;
       const isRoth = tx.type === 'Savings' && (tx.subcategory || '').toLowerCase().includes('roth');
       const person = isRoth ? ((tx.notes || '').toLowerCase().includes('ally') ? 'Ally' : 'Nate') : null;
-      const tyDropdown = isRoth ? rothTaxYearDropdown(tx, tx._i, person, currentEntryKey) : '';
       if (tx.type === 'Savings') {
-        // Derive exact account name from notes + subcategory combination
+        // Category = account (derived from subcategory + notes)
         const note = (tx.notes || '').toLowerCase();
         const sub  = (tx.subcategory || '').toLowerCase();
         if (sub === 'roth ira' || sub === 'roth') {
@@ -6500,24 +6506,37 @@ function renderTxTable(txs) {
         } else if (sub === 'hsa') {
           catLabel = 'Lively HSA';
         } else {
-          // Fallback: use notes or category
           catLabel = tx.notes || tx.category || '';
         }
-        // Subcategory column shows the contribution type
+        // Subcategory = contribution type
         subLabel = tx.category === 'Matching' ? 'Employer Match'
                  : tx.category === 'Withdrawal' ? 'Withdrawal'
                  : 'Personal Contribution';
+        // Description blank for savings (identifier already in the account name)
+        descVal = '';
+        // Misc. = tax-year dropdown for Roth rows
+        miscHtml = isRoth ? rothTaxYearDropdown(tx, tx._i, person, currentEntryKey) : '\u2014';
       } else {
-        // Income, Taxes, Tithing: category = type label, subcategory = notes (Nate 1st, etc.)
+        // Income / Taxes / Tithing
         catLabel = tx.category || tx.type;
-        subLabel = tx.notes || tx.subcategory || '—';
+        subLabel = tx.subcategory || '';
+        descVal  = tx.notes || '';
+        miscHtml = '\u2014';
       }
+      const dashEdit = 'cursor:text;border-bottom:1px dashed var(--border);padding-bottom:1px;display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+      const catCell = tx.type === 'Savings'
+        ? `<span onclick="txEditSavingsAccount(this,${tx._i})" title="Click to edit" style="${dashEdit}">${catLabel}</span>`
+        : `<span onclick="txEditCategory(this,${tx._i})" title="Click to edit" style="${dashEdit}">${catLabel}</span>`;
+      const subCell = tx.type === 'Savings'
+        ? `<span onclick="txEditSavingsKind(this,${tx._i})" title="Click to edit" style="${dashEdit}">${subLabel}</span>`
+        : editSpan(tx._i, 'subcategory', subLabel);
       rows.push(`<tr class="${rowCls}">
         <td></td>
-        <td style="${catStyle}">${catLabel}</td>
-        <td style="${subStyle}">${subLabel}</td>
-        <td style="text-align:left;padding:0 8px;">${tyDropdown}</td>
-        <td style="${txnStyle}">${tx.date || ''}</td>
+        <td style="${catStyle}">${catCell}</td>
+        <td style="font-size:12px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${subCell}</td>
+        <td style="font-size:12px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${tx.type === 'Savings' ? '\u2014' : editSpan(tx._i, 'notes', descVal)}</td>
+        <td style="text-align:left;padding:0 8px;font-size:12px;color:var(--text3);">${miscHtml}</td>
+        <td style="${txnStyle}">${editSpan(tx._i, 'date', tx.date || '')}</td>
         <td class="tx-amt">${amtCell(tx._i, amt)}</td>
         <td style="text-align:center;">${delBtn(tx._i)}</td>
       </tr>`);
@@ -6564,8 +6583,9 @@ function renderTxTable(txs) {
           transform:${isExpanded?'rotate(90deg)':'rotate(0deg)'};
           transition:transform 0.15s;">&#x25B6;</td>
         <td style="${catStyle}">${catLabel}</td>
-        <td style="${subStyle}">${subKey}</td>
+        <td style="font-size:12px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${subKey}</td>
         <td style="${txnStyle}">${group.length} transaction${group.length>1?'s':''}</td>
+        <td></td>
         <td></td>
         <td class="tx-amt" style="font-family:var(--font-mono);font-size:13px;">${fmt(total)}</td>
         <td></td>
@@ -6584,8 +6604,9 @@ function renderTxTable(txs) {
                        padding-bottom:1px;display:inline-block;"
                 title="Click to reassign">${curSub}</span>
             </td>
-            <td style="font-size:12px;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${tx.notes||''}</td>
-            <td style="${txnStyle}">${tx.date || ''}</td>
+            <td style="font-size:12px;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${editSpan(tx._i, 'notes', tx.notes || '')}</td>
+            <td style="text-align:left;padding:0 8px;font-size:12px;color:var(--text3);">\u2014</td>
+            <td style="${txnStyle}">${editSpan(tx._i, 'date', tx.date || '')}</td>
             <td class="tx-amt">${amtCell(tx._i, amt)}</td>
             <td style="text-align:center;">${delBtn(tx._i)}</td>
           </tr>`);
@@ -6595,7 +6616,7 @@ function renderTxTable(txs) {
   }
 
   if (rows.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="7" class="empty-msg">No transactions yet. Click "+ Add Transaction" or use Auto-fill.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" class="empty-msg">No transactions yet. Click "+ Add Transaction" or use Auto-fill.</td></tr>`;
     return;
   }
   tbody.innerHTML = rows.join('');
@@ -6696,9 +6717,149 @@ function txEditAmount(span, i) {
 
 function addTxRow() {
   if (!currentEntryKey) return;
-  txPendingRows.push({ type: 'Expense', category: 'Food', subcategory: 'Groceries', amount: '', notes: '' });
+  txPendingRows.push({ type: 'Expense', category: 'Food', subcategory: 'Groceries', amount: '', notes: '', date: '' });
   const data = loadData();
   renderTxTable(data.transactions[currentEntryKey] || []);
+}
+
+// ---- Standardized column inline editors ----
+
+// Generic text editor for a transaction field (Description = notes, Date, or free-text subcategory).
+function txEditField(span, i, field) {
+  const data = loadData();
+  if (!data.transactions[currentEntryKey]) return;
+  const tx = data.transactions[currentEntryKey][i];
+  if (!tx) return;
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.value = tx[field] || '';
+  input.style.cssText = 'width:100%;box-sizing:border-box;font-size:12px;font-family:var(--font-body);padding:2px 4px;border:1px solid var(--accent);border-radius:4px;background:var(--surface);color:var(--text);';
+  span.replaceWith(input);
+  input.focus();
+  input.select();
+  let done = false;
+  const commit = () => {
+    if (done) return; done = true;
+    const d = loadData();
+    if (d.transactions[currentEntryKey] && d.transactions[currentEntryKey][i]) {
+      d.transactions[currentEntryKey][i][field] = input.value.trim();
+      saveData(d);
+    }
+    renderTxTable(loadData().transactions[currentEntryKey] || []);
+  };
+  input.addEventListener('blur', commit);
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+    if (e.key === 'Escape') { done = true; renderTxTable(loadData().transactions[currentEntryKey] || []); }
+  });
+}
+
+// Category editor for Income/Taxes/Tithing rows: dropdown from TX_CATEGORIES for the row's type.
+function txEditCategory(span, i) {
+  const data = loadData();
+  if (!data.transactions[currentEntryKey]) return;
+  const tx = data.transactions[currentEntryKey][i];
+  if (!tx) return;
+  const opts = TX_CATEGORIES[tx.type] || [];
+  if (!opts.length) return;
+  const sel = document.createElement('select');
+  sel.style.cssText = 'font-size:11px;border:1px solid var(--accent);border-radius:4px;padding:2px 5px;background:var(--surface);color:var(--text);max-width:170px;';
+  opts.forEach(c => {
+    const opt = document.createElement('option');
+    opt.value = c; opt.textContent = c;
+    if (c === tx.category) opt.selected = true;
+    sel.appendChild(opt);
+  });
+  span.replaceWith(sel);
+  sel.focus();
+  const commit = () => {
+    const d = loadData();
+    if (d.transactions[currentEntryKey] && d.transactions[currentEntryKey][i]) {
+      d.transactions[currentEntryKey][i].category = sel.value;
+      saveData(d);
+    }
+    renderTxTable(loadData().transactions[currentEntryKey] || []);
+  };
+  sel.addEventListener('change', commit);
+  sel.addEventListener('blur', () => renderTxTable(loadData().transactions[currentEntryKey] || []));
+  sel.addEventListener('keydown', e => { if (e.key === 'Escape') renderTxTable(loadData().transactions[currentEntryKey] || []); });
+}
+
+// Savings account editor: picks the account, which maps to the underlying subcategory + notes.
+function txEditSavingsAccount(span, i) {
+  const data = loadData();
+  if (!data.transactions[currentEntryKey]) return;
+  const tx = data.transactions[currentEntryKey][i];
+  if (!tx) return;
+  const ACCOUNTS = [
+    { label: "Nate's Roth IRA",  sub: 'ROTH IRA', notes: 'Nate' },
+    { label: "Ally's Roth IRA",  sub: 'ROTH IRA', notes: 'Ally' },
+    { label: 'Elevate 401(k)',   sub: '401k',     notes: 'Elevate 401k' },
+    { label: 'Lively HSA',       sub: 'HSA',      notes: 'Lively' },
+  ];
+  const note = (tx.notes || '').toLowerCase();
+  const sub  = (tx.subcategory || '').toLowerCase();
+  let curLabel = '';
+  if (sub === 'roth ira' || sub === 'roth') curLabel = note.includes('ally') ? "Ally's Roth IRA" : "Nate's Roth IRA";
+  else if (sub === '401k') curLabel = 'Elevate 401(k)';
+  else if (sub === 'hsa') curLabel = 'Lively HSA';
+  const sel = document.createElement('select');
+  sel.style.cssText = 'font-size:11px;border:1px solid var(--accent);border-radius:4px;padding:2px 5px;background:var(--surface);color:var(--text);max-width:170px;';
+  ACCOUNTS.forEach(a => {
+    const opt = document.createElement('option');
+    opt.value = a.label; opt.textContent = a.label;
+    if (a.label === curLabel) opt.selected = true;
+    sel.appendChild(opt);
+  });
+  span.replaceWith(sel);
+  sel.focus();
+  const commit = () => {
+    const acct = ACCOUNTS.find(a => a.label === sel.value);
+    const d = loadData();
+    if (acct && d.transactions[currentEntryKey] && d.transactions[currentEntryKey][i]) {
+      d.transactions[currentEntryKey][i].subcategory = acct.sub;
+      d.transactions[currentEntryKey][i].notes = acct.notes;
+      saveData(d);
+    }
+    renderTxTable(loadData().transactions[currentEntryKey] || []);
+  };
+  sel.addEventListener('change', commit);
+  sel.addEventListener('blur', () => renderTxTable(loadData().transactions[currentEntryKey] || []));
+  sel.addEventListener('keydown', e => { if (e.key === 'Escape') renderTxTable(loadData().transactions[currentEntryKey] || []); });
+}
+
+// Savings contribution-type editor: maps to the underlying category field.
+function txEditSavingsKind(span, i) {
+  const data = loadData();
+  if (!data.transactions[currentEntryKey]) return;
+  const tx = data.transactions[currentEntryKey][i];
+  if (!tx) return;
+  const KINDS = [
+    { label: 'Personal Contribution', cat: 'Personal Contribution' },
+    { label: 'Employer Match',        cat: 'Matching' },
+    { label: 'Withdrawal',            cat: 'Withdrawal' },
+  ];
+  const sel = document.createElement('select');
+  sel.style.cssText = 'font-size:11px;border:1px solid var(--accent);border-radius:4px;padding:2px 5px;background:var(--surface);color:var(--text);max-width:170px;';
+  KINDS.forEach(k => {
+    const opt = document.createElement('option');
+    opt.value = k.cat; opt.textContent = k.label;
+    if (k.cat === tx.category) opt.selected = true;
+    sel.appendChild(opt);
+  });
+  span.replaceWith(sel);
+  sel.focus();
+  const commit = () => {
+    const d = loadData();
+    if (d.transactions[currentEntryKey] && d.transactions[currentEntryKey][i]) {
+      d.transactions[currentEntryKey][i].category = sel.value;
+      saveData(d);
+    }
+    renderTxTable(loadData().transactions[currentEntryKey] || []);
+  };
+  sel.addEventListener('change', commit);
+  sel.addEventListener('blur', () => renderTxTable(loadData().transactions[currentEntryKey] || []));
+  sel.addEventListener('keydown', e => { if (e.key === 'Escape') renderTxTable(loadData().transactions[currentEntryKey] || []); });
 }
 
 function updatePending(i, field, val) {
