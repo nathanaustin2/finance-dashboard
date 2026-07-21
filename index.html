@@ -6349,23 +6349,14 @@ let txPendingRows = []; // new rows awaiting commit, shown at top in white
 //   - Ally first contribution Dec 2025; Dec 2025 - Apr 15 2026 → 2025
 //   - 2023: own year only (no retro)
 function rothTaxYear(dateStr, person, fallbackMonthKey) {
-  let yr, mo, day;
-  if (dateStr && /^\d{4}-\d{2}-\d{2}/.test(dateStr)) {
-    yr  = parseInt(dateStr.slice(0, 4));
-    mo  = parseInt(dateStr.slice(5, 7));
-    day = parseInt(dateStr.slice(8, 10));
-  } else if (dateStr && /^\d{2}\/\d{2}\/\d{4}/.test(dateStr)) {
-    mo  = parseInt(dateStr.slice(0, 2));
-    day = parseInt(dateStr.slice(3, 5));
-    yr  = parseInt(dateStr.slice(6, 10));
-  } else if (fallbackMonthKey && /^\d{4}-\d{2}$/.test(fallbackMonthKey)) {
-    // No date or unrecognized format — use the entry month, assume mid-month for cutoff
-    yr  = parseInt(fallbackMonthKey.slice(0, 4));
-    mo  = parseInt(fallbackMonthKey.slice(5, 7));
-    day = 15; // safe midpoint; only matters for the Apr boundary
-  } else {
-    return null;
+  // Parse via the shared parser (handles YYYY-MM-DD, M/D/YYYY, and "MMM D").
+  let p = parseStoredDate(dateStr, fallbackMonthKey);
+  if (!p && fallbackMonthKey && /^\d{4}-\d{2}$/.test(fallbackMonthKey)) {
+    // No date or unrecognized format — use the entry month, assume mid-month for the cutoff
+    p = { y: parseInt(fallbackMonthKey.slice(0, 4)), m: parseInt(fallbackMonthKey.slice(5, 7)), d: 15 };
   }
+  if (!p) return null;
+  const yr = p.y, mo = p.m, day = p.d;
   if (yr <= 2023) return yr;
   if (yr === 2024) return 2024; // user's rule: no retro to 2023
   // Year >= 2025: Jan-Apr 15 → prior year
@@ -6430,8 +6421,9 @@ function renderTxTable(txs) {
           <select onchange="updatePending(${pi},'subcategory',this.value)" style="${inpStyle}width:135px;"><option value="">—</option>${subOpts}</select>
           <input type="text" value="${row.notes||''}" placeholder="Description" oninput="updatePending(${pi},'notes',this.value)"
             style="${inpStyle}width:130px;">
-          <input type="text" value="${row.date||''}" placeholder="Date" oninput="updatePending(${pi},'date',this.value)"
-            style="${inpStyle}width:88px;">
+          <input type="text" value="${fmtDateDisplay(row.date||'', currentEntryKey, '')}" placeholder="Date" readonly
+            onclick="pendingEditDate(this,${pi})" title="Click to pick a date"
+            style="${inpStyle}width:88px;cursor:pointer;">
         </div>
       </td>
       <td style="text-align:right;padding:8px 12px;">
@@ -6541,7 +6533,7 @@ function renderTxTable(txs) {
         <td style="font-size:12px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${subCell}</td>
         <td style="font-size:12px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${tx.type === 'Savings' ? '\u2014' : editSpan(tx._i, 'notes', descVal)}</td>
         <td style="text-align:left;padding:0 8px;font-size:12px;color:var(--text3);">${miscHtml}</td>
-        <td style="${txnStyle}">${editSpan(tx._i, 'date', tx.date || '')}</td>
+        <td style="${txnStyle}">${editSpan(tx._i, 'date', fmtDateDisplay(tx.date || '', currentEntryKey))}</td>
         <td class="tx-amt">${amtCell(tx._i, amt)}</td>
         <td style="text-align:center;">${delBtn(tx._i)}</td>
       </tr>`);
@@ -6611,7 +6603,7 @@ function renderTxTable(txs) {
             </td>
             <td style="font-size:12px;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${editSpan(tx._i, 'notes', tx.notes || '')}</td>
             <td style="text-align:left;padding:0 8px;font-size:12px;color:var(--text3);">\u2014</td>
-            <td style="${txnStyle}">${editSpan(tx._i, 'date', tx.date || '')}</td>
+            <td style="${txnStyle}">${editSpan(tx._i, 'date', fmtDateDisplay(tx.date || '', currentEntryKey))}</td>
             <td class="tx-amt">${amtCell(tx._i, amt)}</td>
             <td style="text-align:center;">${delBtn(tx._i)}</td>
           </tr>`);
@@ -6766,6 +6758,38 @@ function txEditField(span, i, field) {
 const DP_MONTHS = ['January','February','March','April','May','June',
                    'July','August','September','October','November','December'];
 const DP_MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const DP_MON_IDX = { jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12 };
+
+// Parse a stored date in ANY format the app has ever used into {y, m, d}:
+//   'YYYY-MM-DD' (migrated history), 'M/D/YYYY' (CSV + calendar), 'MMM D' (hand-typed).
+// For the year-less 'MMM D' form, infer the year from monthKey ('YYYY-MM'). Null if unparseable.
+function parseStoredDate(raw, monthKey) {
+  const s = (raw || '').trim();
+  if (!s) return null;
+  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (m) return { y:+m[1], m:+m[2], d:+m[3] };
+  m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (m) return { y:+m[3], m:+m[1], d:+m[2] };
+  m = s.match(/^([A-Za-z]{3,})\s+(\d{1,2}),?\s+(\d{4})$/);   // "Jun 18 2026" / "Jun 18, 2026"
+  if (m) { const mi = DP_MON_IDX[m[1].slice(0,3).toLowerCase()]; if (mi) return { y:+m[3], m:mi, d:+m[2] }; }
+  m = s.match(/^([A-Za-z]{3,})\s+(\d{1,2})$/);               // "Jun 18" (year from monthKey)
+  if (m) {
+    const mi = DP_MON_IDX[m[1].slice(0,3).toLowerCase()];
+    if (mi) {
+      const ek = (monthKey || '').split('-');
+      const y = (ek.length === 2 && ek[0]) ? +ek[0] : new Date().getFullYear();
+      return { y, m:mi, d:+m[2] };
+    }
+  }
+  return null;
+}
+
+// Format a stored date as "MMM D" (e.g. "Jun 18"). Empty/unparseable → emptyText.
+function fmtDateDisplay(raw, monthKey, emptyText = '\u2014') {
+  const p = parseStoredDate(raw, monthKey);
+  if (!p) { const t = (raw || '').trim(); return t ? t : emptyText; }
+  return DP_MONTHS_SHORT[p.m - 1] + ' ' + p.d;
+}
 
 // One-time scoped stylesheet for hover/active states (inline styles can't do :hover).
 function dpEnsureStyle() {
@@ -6784,28 +6808,25 @@ function dpEnsureStyle() {
   document.head.appendChild(s);
 }
 
-function txEditDate(span, i) {
+// Reusable calendar popover (Style B). Anchors under anchorEl. curMDY is the current
+// value as 'MM/DD/YYYY' (or ''). defaultKey is a 'YYYY-MM' used to default the view when
+// there's no current value. onPick(mdyStringOrEmpty) receives the chosen date ('' = Clear).
+// Used by every date field on the Monthly Entry tab via the thin wrappers below.
+function openDatePicker(anchorEl, curMDY, defaultKey, onPick) {
   // Only one picker open at a time
   const existing = document.getElementById('tx-datepicker');
   if (existing) existing.remove();
 
-  const data = loadData();
-  if (!data.transactions[currentEntryKey]) return;
-  const tx = data.transactions[currentEntryKey][i];
-  if (!tx) return;
-
   dpEnsureStyle();
 
-  // Parse current value (MM/DD/YYYY) into the selected date, if any
-  let sel = null;
-  const mdy = (tx.date || '').trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (mdy) sel = { y: +mdy[3], m: +mdy[1], d: +mdy[2] };
+  // Parse the current value (any stored format) into the selected date, if any
+  const sel = parseStoredDate(curMDY, defaultKey);
 
-  // Initial view month/year: selected date → entry month → today
+  // Initial view month/year: selected date → default month (entry month) → today
   let viewY, viewM;
   if (sel) { viewY = sel.y; viewM = sel.m; }
   else {
-    const ek = (currentEntryKey || '').split('-');
+    const ek = (defaultKey || '').split('-');
     if (ek.length === 2 && ek[0] && ek[1]) { viewY = +ek[0]; viewM = +ek[1]; }
     else { const t = new Date(); viewY = t.getFullYear(); viewM = t.getMonth() + 1; }
   }
@@ -6819,8 +6840,8 @@ function txEditDate(span, i) {
     'overflow:hidden;font-family:var(--font-body);';
   document.body.appendChild(pop);
 
-  // Position below the clicked cell, clamped to the viewport
-  const r = span.getBoundingClientRect();
+  // Position below the clicked field, clamped to the viewport
+  const r = anchorEl.getBoundingClientRect();
   let left = r.left + window.scrollX;
   const maxLeft = window.scrollX + document.documentElement.clientWidth - 258;
   if (left > maxLeft) left = Math.max(window.scrollX + 8, maxLeft);
@@ -6851,14 +6872,8 @@ function txEditDate(span, i) {
   }, 0);
 
   function commit(y, m, d) {
-    const d2 = loadData();
-    if (d2.transactions[currentEntryKey] && d2.transactions[currentEntryKey][i]) {
-      d2.transactions[currentEntryKey][i].date =
-        (d == null) ? '' : `${String(m).padStart(2,'0')}/${String(d).padStart(2,'0')}/${y}`;
-      saveData(d2);
-    }
+    onPick((d == null) ? '' : `${String(m).padStart(2,'0')}/${String(d).padStart(2,'0')}/${y}`);
     close();
-    renderTxTable(loadData().transactions[currentEntryKey] || []);
   }
 
   function render() {
@@ -6951,6 +6966,32 @@ function txEditDate(span, i) {
   }
 
   render();
+}
+
+// Saved transaction row: open the calendar and write back to data.transactions.
+function txEditDate(span, i) {
+  const data = loadData();
+  if (!data.transactions[currentEntryKey]) return;
+  const tx = data.transactions[currentEntryKey][i];
+  if (!tx) return;
+  openDatePicker(span, tx.date || '', currentEntryKey, (val) => {
+    const d2 = loadData();
+    if (d2.transactions[currentEntryKey] && d2.transactions[currentEntryKey][i]) {
+      d2.transactions[currentEntryKey][i].date = val;
+      saveData(d2);
+    }
+    renderTxTable(loadData().transactions[currentEntryKey] || []);
+  });
+}
+
+// Unsaved "Add Transaction" pending row: open the calendar and write back to txPendingRows.
+function pendingEditDate(anchorEl, pi) {
+  const row = txPendingRows[pi];
+  if (!row) return;
+  openDatePicker(anchorEl, row.date || '', currentEntryKey, (val) => {
+    updatePending(pi, 'date', val);                          // stores the real date
+    anchorEl.value = fmtDateDisplay(val, currentEntryKey, ''); // shows it as "MMM D"
+  });
 }
 
 // Category editor for Income/Taxes/Tithing rows: dropdown from TX_CATEGORIES for the row's type.
@@ -8023,7 +8064,7 @@ function csvRenderReview() {
       ? `<span style="font-size:10px;color:var(--accent);white-space:nowrap;">✓ rule saved</span>`
       : `<button onclick="csvRememberRule(${r.id})" title="Remember this merchant→category mapping for next time" style="background:none;border:none;cursor:pointer;color:var(--text3);font-size:10px;padding:0;text-decoration:underline;white-space:nowrap;">↻ remember</button>`;
     html += `<tr class="${r.conf === 'low' ? 'flagged' : ''}">
-      <td class="date-col">${r.date}</td>
+      <td class="date-col">${fmtDateDisplay(r.date, currentEntryKey)}</td>
       <td class="merchant-col">
         <div>${r.merchant}${flagHtml}</div>
         <div style="margin-top:2px;">${rememberHtml}</div>
