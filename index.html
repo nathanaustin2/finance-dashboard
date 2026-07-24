@@ -6409,7 +6409,9 @@ function renderTxTable(txs) {
       title="Click to edit">${fmt(amt)}</span>`;
 
   const delBtn = (i) =>
-    `<button class="tx-act-btn tx-discard-btn" onclick="removeTx(${i})" title="Delete">&#x2715;</button>`;
+    `<button onclick="removeTx(${i})" title="Delete"
+      style="background:none;border:none;cursor:pointer;color:var(--text3);
+             font-size:13px;line-height:1;padding:2px 6px;">&#x2715;</button>`;
 
   // ---- PENDING ROWS: new rows at top, white background, full edit controls ----
   const rows = [];
