@@ -1484,6 +1484,7 @@
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;">
       <button class="btn btn-secondary" style="font-size:12px;padding:5px 10px;" onclick="txToggleAllGroups()"><span id="tx-expand-label">Expand All</span></button>
       <button class="btn btn-primary" onclick="addTxRow()">+ Add Transaction</button>
+      <button class="btn btn-secondary" id="tx-manage-btn" style="font-size:12px;padding:5px 10px;margin-left:auto;" onclick="toggleTxManageMode()">Manage</button>
     </div>
     <div class="card" style="padding:0;overflow:hidden;">
       <table class="fin-table" id="tx-table" style="table-layout:fixed;width:100%;">
@@ -6240,6 +6241,8 @@ function selectEntryMonth(key) {
   const importLbl2 = document.getElementById('import-month-label');
   if (importLbl2) importLbl2.textContent = monthName;
   updateEntryMonthGrid();
+  txManageMode = false;   // start each month in safe (non-manage) mode
+  updateManageBtn();
   loadEntryData(key);
   loadBalanceData(key);
   updateEntryProgress();
@@ -6347,6 +6350,23 @@ const TX_SUBCATEGORIES = {
 let txExpandedGroups = new Set();
 let txAllExpanded = false;
 let txPendingRows = []; // new rows awaiting commit, shown at top in white
+let txManageMode = false; // off by default: saved rows show no delete button until Manage is on
+
+// Keep the Manage button's label/style in sync with the current mode.
+function updateManageBtn() {
+  const b = document.getElementById('tx-manage-btn');
+  if (!b) return;
+  b.className = 'btn ' + (txManageMode ? 'btn-primary' : 'btn-secondary');
+  b.textContent = txManageMode ? 'Done' : 'Manage';
+}
+
+// Toggle Manage mode: reveals/hides the per-row delete button on SAVED transactions only.
+// Pending "Add Transaction" rows keep their own confirm/discard controls regardless.
+function toggleTxManageMode() {
+  txManageMode = !txManageMode;
+  updateManageBtn();
+  renderTxTable(loadData().transactions[currentEntryKey] || []);
+}
 
 // Compute the tax year for a Roth IRA contribution based on date.
 // Rules: Apr 15 cutoff — Jan 1 - Apr 15 contributions can be designated to prior tax year.
@@ -6409,9 +6429,9 @@ function renderTxTable(txs) {
       title="Click to edit">${fmt(amt)}</span>`;
 
   const delBtn = (i) =>
-    `<button onclick="removeTx(${i})" title="Delete"
-      style="background:none;border:none;cursor:pointer;color:var(--text3);
-             font-size:13px;line-height:1;padding:2px 6px;">&#x2715;</button>`;
+    txManageMode
+      ? `<button class="tx-act-btn tx-discard-btn" onclick="removeTx(${i})" title="Delete">&#x2715;</button>`
+      : '';
 
   // ---- PENDING ROWS: new rows at top, white background, full edit controls ----
   const rows = [];
@@ -6542,7 +6562,7 @@ function renderTxTable(txs) {
         <td style="text-align:left;padding:0 8px;font-size:12px;color:var(--text3);">${miscHtml}</td>
         <td style="${txnStyle}">${editSpan(tx._i, 'date', fmtDateDisplay(tx.date || '', currentEntryKey))}</td>
         <td class="tx-amt">${amtCell(tx._i, amt)}</td>
-        <td style="text-align:center;">${delBtn(tx._i)}</td>
+        <td style="text-align:right;padding-right:10px;">${delBtn(tx._i)}</td>
       </tr>`);
     });
   });
@@ -6612,7 +6632,7 @@ function renderTxTable(txs) {
             <td style="text-align:left;padding:0 8px;font-size:12px;color:var(--text3);">\u2014</td>
             <td style="${txnStyle}">${editSpan(tx._i, 'date', fmtDateDisplay(tx.date || '', currentEntryKey))}</td>
             <td class="tx-amt">${amtCell(tx._i, amt)}</td>
-            <td style="text-align:center;">${delBtn(tx._i)}</td>
+            <td style="text-align:right;padding-right:10px;">${delBtn(tx._i)}</td>
           </tr>`);
         });
       }
