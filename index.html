@@ -137,6 +137,15 @@
   #tx-table td { text-align: left; font-family: var(--font-body); }
   #tx-table td.tx-amt { text-align: right; font-family: var(--font-mono); }
 
+  /* Action buttons in the transaction log's last column (confirm / discard / delete) */
+  .tx-act-btn { border-radius: 5px; cursor: pointer; font-size: 12px; line-height: 1;
+    font-weight: 600; padding: 5px 9px; font-family: var(--font-body);
+    transition: background 0.12s, border-color 0.12s, color 0.12s; }
+  .tx-confirm-btn { background: var(--accent); color: #fff; border: 1px solid var(--accent); }
+  .tx-confirm-btn:hover { background: var(--accent-light); border-color: var(--accent-light); }
+  .tx-discard-btn { background: var(--surface); color: var(--text2); border: 1px solid var(--border); }
+  .tx-discard-btn:hover { background: var(--red-bg); color: var(--red); border-color: var(--red); }
+
   .entry-check-row {
     display: flex; align-items: center; gap: 10px;
     padding: 9px 12px; border-radius: 7px; font-size: 13px;
@@ -1486,7 +1495,7 @@
           <col style="width:88px;">   <!-- Misc. -->
           <col style="width:86px;">   <!-- Date -->
           <col style="width:104px;">  <!-- Amount -->
-          <col style="width:32px;">   <!-- Delete -->
+          <col style="width:80px;">   <!-- Actions: delete (saved rows) / confirm + discard (pending rows) -->
         </colgroup>
         <thead><tr><td colspan="8" style="padding:0;height:0;border:none;"></td></tr></thead>
         <tbody id="tx-tbody"></tbody>
@@ -6318,7 +6327,7 @@ const TX_TYPES = ['Income','Taxes','Tithing','Savings','Expense'];
 const TX_CATEGORIES = {
   Income: ['Wage Income','Interest/Dividend Income','Other Income'],
   Taxes: ['Federal Income Tax','State Income Tax','Social Security','Medicare'],
-  Tithing: ['Tithing'],
+  Tithing: ['Tithing','Fast Offering'],
   Savings: ['Personal Contribution','Matching','Withdrawal'],
   Expense: ['Healthcare','Housing','Transportation','Food','Personal','Miscellaneous']
 };
@@ -6400,9 +6409,7 @@ function renderTxTable(txs) {
       title="Click to edit">${fmt(amt)}</span>`;
 
   const delBtn = (i) =>
-    `<button onclick="removeTx(${i})" title="Delete"
-      style="background:none;border:none;cursor:pointer;color:var(--text3);
-             font-size:13px;line-height:1;padding:2px 6px;">&#x2715;</button>`;
+    `<button class="tx-act-btn tx-discard-btn" onclick="removeTx(${i})" title="Delete">&#x2715;</button>`;
 
   // ---- PENDING ROWS: new rows at top, white background, full edit controls ----
   const rows = [];
@@ -6431,12 +6438,10 @@ function renderTxTable(txs) {
           oninput="updatePending(${pi},'amount',this.value)"
           style="${inpStyle}width:84px;text-align:right;font-family:var(--font-mono);">
       </td>
-      <td style="text-align:center;padding:8px 6px;white-space:nowrap;">
-        <button onclick="commitPendingRow(${pi})" title="Add to log"
-          style="background:var(--accent);color:white;border:none;border-radius:4px;
-                 cursor:pointer;font-size:12px;font-weight:600;padding:4px 10px;margin-right:4px;">✓</button>
-        <button onclick="discardPendingRow(${pi})" title="Discard"
-          style="background:none;border:none;cursor:pointer;color:var(--text3);font-size:13px;padding:2px 4px;">✕</button>
+      <td style="text-align:center;padding:8px 10px;white-space:nowrap;">
+        <button class="tx-act-btn tx-confirm-btn" onclick="commitPendingRow(${pi})" title="Add to log"
+          style="margin-right:6px;">✓</button>
+        <button class="tx-act-btn tx-discard-btn" onclick="discardPendingRow(${pi})" title="Discard">✕</button>
       </td>
     </tr>`;
   }).join('');
@@ -8665,23 +8670,39 @@ function migrateHSAWithdrawals() {
   }
 }
 
-function migrateFastOfferingNotes() {
-  // The Fast Offering recurring template shares type/category ('Tithing'/'Tithing') with
-  // regular tithing. The "already added" check keys off type|category|subcategory|notes, so
-  // a blank-notes Fast Offering template collides with any tithing row that also has blank
-  // notes and is wrongly greyed out as "already added". Giving the template a distinct note
-  // ("Fast Offering") makes its signature unique so it can be added independently.
+function migrateFastOfferingCategory() {
+  // Fast Offering is now a first-class category under the Tithing type. Historically it was
+  // recorded inconsistently on Tithing/Tithing rows — marked by notes="Fast Offering" on some
+  // and subcategory="Fast Offering" on others (plus the recurring template used the notes hack
+  // to stay unique in the "already added" check). Convert every legacy Fast Offering row —
+  // committed transactions AND recurring templates — to category="Fast Offering". Because
+  // Tithing/Fast Offering is naturally unique from Tithing/Tithing, the notes hack is no longer
+  // needed. Idempotent: rows already on the new category are skipped, and Fast Offering still
+  // rolls into the Tithing total (all tithing aggregates by type, not category).
   const data = loadData();
-  if (!Array.isArray(data.recurringTemplates)) return;
   let changed = false;
-  data.recurringTemplates.forEach(t => {
-    if (t.type === 'Tithing'
-        && /fast\s*offering/i.test(t.label || '')
-        && !(t.notes || '').trim()) {
-      t.notes = 'Fast Offering';
-      changed = true;
-    }
+  const FO = /fast\s*offering/i;
+  const convert = (t) => {
+    t.category = 'Fast Offering';
+    if (FO.test(t.subcategory || '')) t.subcategory = '';          // clear the old subcategory marker
+    if (/^\s*fast\s*offering\s*$/i.test(t.notes || '')) t.notes = ''; // drop the now-redundant marker note
+    changed = true;
+  };
+  // Committed transactions
+  const txByMonth = data.transactions || {};
+  Object.keys(txByMonth).forEach(mk => {
+    (txByMonth[mk] || []).forEach(t => {
+      if (t && t.type === 'Tithing' && t.category !== 'Fast Offering'
+          && (FO.test(t.notes || '') || FO.test(t.subcategory || ''))) convert(t);
+    });
   });
+  // Recurring templates (also matchable by label, e.g. label "Fast Offering")
+  if (Array.isArray(data.recurringTemplates)) {
+    data.recurringTemplates.forEach(t => {
+      if (t && t.type === 'Tithing' && t.category !== 'Fast Offering'
+          && (FO.test(t.notes || '') || FO.test(t.subcategory || '') || FO.test(t.label || ''))) convert(t);
+    });
+  }
   if (changed) saveData(data);
 }
 
@@ -8691,7 +8712,7 @@ function init() {
   migratePayrollTax();
   migrateBalanceEvents();
   migrateHSAWithdrawals();
-  migrateFastOfferingNotes();
+  migrateFastOfferingCategory();
 
   renderIS();
   // Default preset: T12 — set after renderIS so HISTORICAL_IS is available
