@@ -6494,6 +6494,18 @@ function renderTxTable(txs) {
         font-family:var(--font-body);">${label}</td>
     </tr>`;
 
+  // Sort a group of transactions chronologically (earliest first). Uses parseStoredDate so it
+  // handles every stored date format (YYYY-MM-DD, M/D/YYYY, "MMM D"); undated rows sink to the
+  // bottom, and same-date rows keep their original order.
+  const txDateKey = (tx) => {
+    const p = parseStoredDate(tx.date, currentEntryKey);
+    return p ? (p.y * 10000 + p.m * 100 + p.d) : Infinity;
+  };
+  const sortByDate = (arr) => arr.sort((a, b) => {
+    const d = txDateKey(a) - txDateKey(b);
+    return d !== 0 ? d : (a._i - b._i);
+  });
+
   const expenseTxs    = txs.map((tx,i)=>({...tx,_i:i})).filter(tx=>tx.type==='Expense');
   const nonExpenseTxs = txs.map((tx,i)=>({...tx,_i:i})).filter(tx=>tx.type!=='Expense');
 
@@ -6507,6 +6519,7 @@ function renderTxTable(txs) {
   typeOrder.forEach(type => {
     const group = byType[type];
     if (!group || group.length === 0) return;
+    sortByDate(group);
     rows.push(sectionHeader(type));
     group.forEach(tx => {
       const rowCls = tx.type === 'Savings'  ? 'tx-savings'
@@ -6597,6 +6610,7 @@ function renderTxTable(txs) {
 
     subOrder2.forEach(subKey => {
       const group = subGroups[subKey];
+      sortByDate(group);
       const total = group.reduce((s,tx) => s + (parseFloat(tx.amount)||0), 0);
       const isExpanded = txExpandedGroups.has(subKey);
       const catLabel = group[0]?.category || '';
