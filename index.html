@@ -6539,13 +6539,13 @@ function renderTxTable(txs) {
         // Description blank for savings (identifier already in the account name)
         descVal = '';
         // Misc. = tax-year dropdown for Roth rows
-        miscHtml = isRoth ? rothTaxYearDropdown(tx, tx._i, person, currentEntryKey) : '\u2014';
+        miscHtml = isRoth ? rothTaxYearDropdown(tx, tx._i, person, currentEntryKey) : '';
       } else {
         // Income / Taxes / Tithing
         catLabel = tx.category || tx.type;
         subLabel = tx.subcategory || '';
         descVal  = tx.notes || '';
-        miscHtml = '\u2014';
+        miscHtml = '';
       }
       const dashEdit = 'cursor:text;border-bottom:1px dashed var(--border);padding-bottom:1px;display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
       const catCell = tx.type === 'Savings'
@@ -6629,7 +6629,7 @@ function renderTxTable(txs) {
                 title="Click to reassign">${curSub}</span>
             </td>
             <td style="font-size:12px;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${editSpan(tx._i, 'notes', tx.notes || '')}</td>
-            <td style="text-align:left;padding:0 8px;font-size:12px;color:var(--text3);">\u2014</td>
+            <td style="text-align:left;padding:0 8px;font-size:12px;color:var(--text3);"></td>
             <td style="${txnStyle}">${editSpan(tx._i, 'date', fmtDateDisplay(tx.date || '', currentEntryKey))}</td>
             <td class="tx-amt">${amtCell(tx._i, amt)}</td>
             <td style="text-align:right;padding-right:10px;">${delBtn(tx._i)}</td>
