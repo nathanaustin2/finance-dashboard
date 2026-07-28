@@ -2548,6 +2548,173 @@ function toggleISSection(groupKeysCsv) {
   });
 }
 
+// ===================== IS DRILL-DOWN =====================
+// Click a number on the Income Statement to see the underlying Monthly Entry transactions.
+// Each filter returns the SIGNED amount a transaction contributes to that IS cell (or null if
+// it doesn't belong) — the exact same branching as getMonthISData — so the popup total always
+// equals the displayed cell value by construction.
+const IS_DRILL_FILTERS = {
+  grossIncome: { title:'Gross Income', match:t => t.type==='Income' ? +t.amount||0 : null },
+  taxes:       { title:'Taxes',        match:t => t.type==='Taxes'  ? +t.amount||0 : null },
+  tithing:     { title:'Tithing',      match:t => t.type==='Tithing'? +t.amount||0 : null },
+  sRoth:  { title:'Roth IRA Contributions',   match:t => t.type==='Savings'&&t.category==='Personal Contribution'&&t.subcategory==='ROTH IRA' ? +t.amount||0 : null },
+  s401k:  { title:'401(k) Roth Contributions',match:t => t.type==='Savings'&&t.category==='Personal Contribution'&&t.subcategory==='401k' ? +t.amount||0 : null },
+  sHSA:   { title:'HSA (net of withdrawals)', match:t => t.type!=='Savings'?null : (t.category==='Personal Contribution'&&t.subcategory==='HSA') ? +t.amount||0 : (t.category==='Withdrawal'&&t.subcategory==='HSA') ? -(+t.amount||0) : null },
+  m401k:  { title:'401(k) Employer Match',    match:t => t.type==='Savings'&&t.category==='Matching'&&t.subcategory==='401k' ? +t.amount||0 : null },
+  mHSA:   { title:'HSA Employer Match',       match:t => t.type==='Savings'&&t.category==='Matching'&&t.subcategory==='HSA' ? +t.amount||0 : null },
+  personalContrib: { title:'Personal Contribution (net)', match:t => {
+      if (t.type!=='Savings') return null; const a=+t.amount||0;
+      if (t.category==='Personal Contribution' && ['401k','ROTH IRA','HSA'].includes(t.subcategory)) return a;
+      if (t.category==='Withdrawal' && ['401k','ROTH IRA','HSA'].includes(t.subcategory)) return -a;
+      return null; } },
+  employerMatch: { title:'Employer Match', match:t => t.type==='Savings'&&t.category==='Matching'&&['401k','HSA'].includes(t.subcategory) ? +t.amount||0 : null },
+  premiums:   { title:'Healthcare · Premiums', match:t => t.type==='Expense'&&t.category==='Healthcare'&&t.subcategory==='Premiums' ? +t.amount||0 : null },
+  hcServices: { title:'Healthcare · Services', match:t => t.type==='Expense'&&t.category==='Healthcare'&&t.subcategory==='Healthcare Services' ? +t.amount||0 : null },
+  hcOther:    { title:'Healthcare · Other',    match:t => t.type==='Expense'&&t.category==='Healthcare'&&t.subcategory!=='Premiums'&&t.subcategory!=='Healthcare Services' ? +t.amount||0 : null },
+  rent:        { title:'Housing · Rent',       match:t => t.type==='Expense'&&t.category==='Housing'&&t.subcategory==='Rent' ? +t.amount||0 : null },
+  utilities:   { title:'Housing · Utilities',  match:t => t.type==='Expense'&&t.category==='Housing'&&t.subcategory==='Utilities' ? +t.amount||0 : null },
+  housingOther:{ title:'Housing · Maintenance/Other', match:t => t.type==='Expense'&&t.category==='Housing'&&t.subcategory!=='Rent'&&t.subcategory!=='Utilities' ? +t.amount||0 : null },
+  gas:           { title:'Transportation · Gas',       match:t => t.type==='Expense'&&t.category==='Transportation'&&t.subcategory==='Gas' ? +t.amount||0 : null },
+  carIns:        { title:'Transportation · Insurance', match:t => t.type==='Expense'&&t.category==='Transportation'&&t.subcategory==='Insurance' ? +t.amount||0 : null },
+  transportOther:{ title:'Transportation · Maintenance/Other', match:t => t.type==='Expense'&&t.category==='Transportation'&&t.subcategory!=='Gas'&&t.subcategory!=='Insurance' ? +t.amount||0 : null },
+  groceries:  { title:'Food · Groceries',   match:t => t.type==='Expense'&&t.category==='Food'&&t.subcategory==='Groceries' ? +t.amount||0 : null },
+  restaurants:{ title:'Food · Restaurants', match:t => t.type==='Expense'&&t.category==='Food'&&t.subcategory!=='Groceries' ? +t.amount||0 : null },
+  personalItems:{ title:'Personal · Personal Items', match:t => t.type==='Expense'&&t.category==='Personal'&&t.subcategory==='Personal Items' ? +t.amount||0 : null },
+  entertainment:{ title:'Personal · Entertainment',  match:t => t.type==='Expense'&&t.category==='Personal'&&t.subcategory==='Entertainment' ? +t.amount||0 : null },
+  travel:       { title:'Personal · Travel',         match:t => t.type==='Expense'&&t.category==='Personal'&&t.subcategory==='Travel' ? +t.amount||0 : null },
+  subscriptions:{ title:'Personal · Subscriptions',  match:t => t.type==='Expense'&&t.category==='Personal'&&t.subcategory==='Subscriptions' ? +t.amount||0 : null },
+  largeOneTime: { title:'Personal · Large One-time', match:t => t.type==='Expense'&&t.category==='Personal'&&t.subcategory==='Large One-time Expenses' ? +t.amount||0 : null },
+  misc: { title:'Miscellaneous', match:t => t.type==='Expense' && (t.category==='Miscellaneous' || (t.category==='Personal'&&t.subcategory==='Miscellaneous')) ? +t.amount||0 : null },
+  totalHealthcare:{ title:'Healthcare (all)',     match:t => t.type==='Expense'&&t.category==='Healthcare' ? +t.amount||0 : null },
+  totalHousing:   { title:'Housing (all)',        match:t => t.type==='Expense'&&t.category==='Housing' ? +t.amount||0 : null },
+  totalTransport: { title:'Transportation (all)', match:t => t.type==='Expense'&&t.category==='Transportation' ? +t.amount||0 : null },
+  totalFood:      { title:'Food (all)',           match:t => t.type==='Expense'&&t.category==='Food' ? +t.amount||0 : null },
+  totalPersonal:  { title:'Personal (all)',       match:t => {
+      if (t.type!=='Expense'||t.category!=='Personal'||t.subcategory==='Miscellaneous') return null;
+      if (t.subcategory==='Large One-time Expenses' && window._excludeLargeOneTime) return null;
+      return +t.amount||0; } },
+};
+
+function isDrillEnsureStyle() {
+  if (document.getElementById('is-drill-style')) return;
+  const s = document.createElement('style');
+  s.id = 'is-drill-style';
+  s.textContent =
+    '#is-tbody td.is-drill{cursor:pointer;}' +
+    '#is-tbody td.is-drill:hover{background:var(--accent-bg);box-shadow:inset 0 -1px 0 var(--accent-light);}';
+  document.head.appendChild(s);
+}
+
+// Gather (tx, signedAmt) pairs for a drill key in one month. Returns null if the month has no
+// meaningful transactions (i.e. the IS fell back to aggregated HISTORICAL_IS data).
+function isDrillCollect(key, mk) {
+  const f = IS_DRILL_FILTERS[key];
+  const txs = (loadData().transactions || {})[mk];
+  const hasMeaningfulTxs = txs && txs.some(t => parseFloat(t.amount) !== 0 && t.amount !== '' && t.amount != null);
+  if (!hasMeaningfulTxs) return null;
+  const out = [];
+  txs.forEach(t => {
+    const a = f.match(t);
+    if (a !== null && a !== 0) out.push({ tx: t, amt: a, mk });
+  });
+  return out;
+}
+
+function closeISDrill() {
+  const el = document.getElementById('is-drill-overlay');
+  if (el) el.remove();
+  document.removeEventListener('keydown', isDrillOnKey, true);
+}
+function isDrillOnKey(e) { if (e.key === 'Escape') closeISDrill(); }
+
+// monthKeys: array of 'YYYY-MM' — one for a month cell, several for the Total/Average column.
+function openISDrill(key, monthKeys) {
+  closeISDrill();
+  isDrillEnsureStyle();
+  const f = IS_DRILL_FILTERS[key];
+  if (!f) return;
+  const multi = monthKeys.length > 1;
+
+  let items = [];
+  const fallbackMonths = [];
+  monthKeys.forEach(mk => {
+    const got = isDrillCollect(key, mk);
+    if (got === null) fallbackMonths.push(mk); else items = items.concat(got);
+  });
+  // Sort chronologically using the shared parser; undated rows sink to the bottom of their month.
+  const dkey = (it) => {
+    const p = parseStoredDate(it.tx.date, it.mk);
+    return p ? p.y*10000 + p.m*100 + p.d : parseInt(it.mk.replace('-','')) * 100 + 99;
+  };
+  items.sort((a,b) => dkey(a) - dkey(b));
+  const total = items.reduce((s,it) => s + it.amt, 0);
+
+  const mkLabel = (mk) => { const [y,mo] = mk.split('-'); return `${DP_MONTHS_SHORT[+mo-1]} ${y}`; };
+  const rangeLabel = multi ? `${mkLabel(monthKeys[0])} – ${mkLabel(monthKeys[monthKeys.length-1])}` : mkLabel(monthKeys[0]);
+
+  const rowsHtml = items.map(it => {
+    const t = it.tx;
+    const isNeg = it.amt < 0;
+    const catBits = [t.category, t.subcategory].filter(Boolean).join(' / ');
+    return `<tr>
+      ${multi ? `<td style="font-family:var(--font-mono);font-size:11px;color:var(--text3);white-space:nowrap;">${mkLabel(it.mk)}</td>` : ''}
+      <td style="font-family:var(--font-mono);font-size:12px;color:var(--text2);white-space:nowrap;">${fmtDateDisplay(t.date, it.mk)}</td>
+      <td style="font-size:12px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px;">${catBits}${t.category==='Withdrawal' ? ' <span style="font-size:10px;color:var(--red);">(withdrawal)</span>' : ''}</td>
+      <td style="font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;max-width:200px;">${(t.notes||'').replace(/</g,'&lt;') || '<span style="color:var(--text3);">—</span>'}</td>
+      <td style="font-family:var(--font-mono);font-size:12px;text-align:right;white-space:nowrap;color:${isNeg?'var(--red)':'var(--text)'};">${isNeg?'−':''}${fmt(Math.abs(it.amt))}</td>
+    </tr>`;
+  }).join('');
+
+  const fallbackNote = fallbackMonths.length
+    ? `<div style="padding:8px 16px;font-size:11px;color:var(--text3);border-top:0.5px solid var(--border);">No transaction-level detail for ${fallbackMonths.map(mkLabel).join(', ')} — those months use aggregated historical data.</div>`
+    : '';
+  const emptyNote = (!items.length && !fallbackMonths.length)
+    ? `<div style="padding:20px 16px;font-size:12px;color:var(--text3);text-align:center;">No matching transactions.</div>` : '';
+
+  const overlay = document.createElement('div');
+  overlay.id = 'is-drill-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(26,23,20,0.35);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px;';
+  overlay.innerHTML =
+    `<div style="background:var(--surface);border-radius:12px;box-shadow:0 20px 50px rgba(26,23,20,.25);max-width:640px;width:100%;max-height:80vh;display:flex;flex-direction:column;overflow:hidden;">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:0.5px solid var(--border);">
+        <div>
+          <div style="font-family:var(--font-display);font-size:16px;color:var(--text);">${f.title}</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:2px;">${rangeLabel} · ${items.length} transaction${items.length===1?'':'s'}</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;">
+          <span style="font-family:var(--font-mono);font-size:15px;font-weight:500;color:${total<0?'var(--red)':'var(--text)'};">${total<0?'−':''}${fmt(Math.abs(total))}</span>
+          <button onclick="closeISDrill()" title="Close" style="background:var(--surface);border:1px solid var(--border);border-radius:5px;color:var(--text2);font-size:12px;font-weight:600;line-height:1;padding:5px 9px;cursor:pointer;">✕</button>
+        </div>
+      </div>
+      <div style="overflow-y:auto;">
+        <table style="width:100%;border-collapse:collapse;">
+          <thead><tr style="position:sticky;top:0;background:var(--surface2);">
+            ${multi ? '<th style="text-align:left;padding:6px 8px 6px 16px;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text3);">Month</th>' : ''}
+            <th style="text-align:left;padding:6px 8px ${multi?'':'6px 16px'};font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text3);">Date</th>
+            <th style="text-align:left;padding:6px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text3);">Category</th>
+            <th style="text-align:left;padding:6px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text3);">Description</th>
+            <th style="text-align:right;padding:6px 16px 6px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text3);">Amount</th>
+          </tr></thead>
+          <tbody style="font-size:12px;" class="is-drill-body">${rowsHtml}</tbody>
+        </table>
+        ${emptyNote}${fallbackNote}
+      </div>
+    </div>`;
+  // pad the row cells consistently
+  overlay.querySelectorAll('.is-drill-body td').forEach(td => { td.style.padding = '7px 8px'; td.style.borderTop = '0.5px solid var(--surface2)'; });
+  overlay.querySelectorAll('.is-drill-body tr').forEach(tr => {
+    const tds = tr.querySelectorAll('td');
+    if (tds.length) { tds[0].style.paddingLeft = '16px'; tds[tds.length-1].style.paddingRight = '16px'; }
+  });
+  overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) closeISDrill(); });
+  document.body.appendChild(overlay);
+  document.addEventListener('keydown', isDrillOnKey, true);
+}
+
+// Handlers wired from the IS cells (single month / whole displayed range).
+function isDrillCell(key, mk)  { openISDrill(key, [mk]); }
+function isDrillRange(key)     { openISDrill(key, window._isDrillPeriodKeys || []); }
+
 function renderIS() {
   const fromMonth = parseInt(document.getElementById('is-from-month').value);
   const fromYear  = parseInt(document.getElementById('is-from-year').value);
@@ -2637,9 +2804,20 @@ function renderIS() {
   document.getElementById('is-thead').innerHTML = thead;
 
   const rows = [];
+  // Month keys for the displayed range — used by the Total/Average column drill.
+  window._isDrillPeriodKeys = periods.map(p => getMonthKey(p.year, p.month));
+  isDrillEnsureStyle();
   const vc = (v, isTotal=false) => {
     if (v == null || v === 0) return `<td class="${isTotal?'total-col':''}" style="color:var(--text3);">—</td>`;
     return `<td class="${isTotal?'total-col':''}">${fmt(v)}</td>`;
+  };
+  // Drill-aware cell: clickable when a drill key is given and the value is non-zero.
+  const vcd = (v, drillKey, idx, isTotal=false) => {
+    if (!drillKey || v == null || v === 0) return vc(v, isTotal);
+    const onclick = isTotal
+      ? `event.stopPropagation();isDrillRange('${drillKey}')`
+      : `event.stopPropagation();isDrillCell('${drillKey}','${window._isDrillPeriodKeys[idx]}')`;
+    return `<td class="is-drill ${isTotal?'total-col':''}" onclick="${onclick}" title="Click to see transactions">${fmt(v)}</td>`;
   };
   const vcKey = (v, isTotal=false) => `<td class="${isTotal?'total-col':''}" style="font-weight:700;">${fmt(v)}</td>`;
   const sect = (label, childGroups) => {
@@ -2648,28 +2826,28 @@ function renderIS() {
       : '';
     rows.push(`<tr class="section-header"${attrs}><td class="row-label">${label}</td>${Array(numDataCols).fill('<td></td>').join('')}</tr>`);
   };
-  const row = (label, getter, indent='', labelSuffix='', groupKey='') => {
+  const row = (label, getter, indent='', labelSuffix='', groupKey='', drillKey='') => {
     const vals = monthData.map(d => getter(d));
     const tot = agg(vals);
     const hidden = groupKey && isCollapsed(groupKey) ? ' style="display:none;"' : '';
     const attr = groupKey ? ` data-ismember="${groupKey}"` : '';
-    rows.push(`<tr${attr}${hidden}><td class="row-label ${indent}">${label}${labelSuffix}</td>${vals.map(v=>vc(v)).join('')}${showTotal ? vc(tot, true) : ''}</tr>`);
+    rows.push(`<tr${attr}${hidden}><td class="row-label ${indent}">${label}${labelSuffix}</td>${vals.map((v,i)=>vcd(v,drillKey,i)).join('')}${showTotal ? vcd(tot, drillKey, -1, true) : ''}</tr>`);
   };
   // Collapsible category groups: clicking a category row hides/shows its subcategory rows.
   // State persists across re-renders in window._isCollapsed (a Set of group keys).
   if (!window._isCollapsed) window._isCollapsed = new Set();
   const isCollapsed = (key) => window._isCollapsed.has(key);
-  const savingsGroupRow = (label, getter, groupKey) => {
+  const savingsGroupRow = (label, getter, groupKey, drillKey='') => {
     const vals = monthData.map(d => getter(d));
     const tot = agg(vals);
     const attrs = groupKey ? ` data-isgroup="${groupKey}" onclick="toggleISGroup('${groupKey}')" style="cursor:pointer;"` : '';
-    rows.push(`<tr class="savings-group-row"${attrs}><td class="row-label savings-group-label">${label}</td>${vals.map(v=>vc(v)).join('')}${showTotal ? vc(tot, true) : ''}</tr>`);
+    rows.push(`<tr class="savings-group-row"${attrs}><td class="row-label savings-group-label">${label}</td>${vals.map((v,i)=>vcd(v,drillKey,i)).join('')}${showTotal ? vcd(tot, drillKey, -1, true) : ''}</tr>`);
   };
-  const expenseCategoryRow = (label, getter, groupKey) => {
+  const expenseCategoryRow = (label, getter, groupKey, drillKey='') => {
     const vals = monthData.map(d => getter(d));
     const tot = agg(vals);
     const attrs = groupKey ? ` data-isgroup="${groupKey}" onclick="toggleISGroup('${groupKey}')" style="cursor:pointer;"` : '';
-    rows.push(`<tr class="expense-cat-row"${attrs}><td class="row-label">${label}</td>${vals.map(v=>vc(v)).join('')}${showTotal ? vc(tot, true) : ''}</tr>`);
+    rows.push(`<tr class="expense-cat-row"${attrs}><td class="row-label">${label}</td>${vals.map((v,i)=>vcd(v,drillKey,i)).join('')}${showTotal ? vcd(tot, drillKey, -1, true) : ''}</tr>`);
   };
   const subtotalRow = (label, getter) => {
     const vals = monthData.map(d => getter(d));
@@ -2689,45 +2867,45 @@ function renderIS() {
   const spacer = () => rows.push(`<tr><td colspan="${numDataCols+1}" style="height:4px;background:var(--surface2);"></td></tr>`);
 
   sect('INCOME');
-  row('Gross Income', d => d.grossIncome);
-  row('Taxes', d => d.taxes, 'indent');
+  row('Gross Income', d => d.grossIncome, '', '', '', 'grossIncome');
+  row('Taxes', d => d.taxes, 'indent', '', '', 'taxes');
   subtotalRow('Net Income', d => d.netIncome);
   spacer();
-  row('Tithing', d => d.tithing, 'indent');
+  row('Tithing', d => d.tithing, 'indent', '', '', 'tithing');
   spacer();
   sect('SAVINGS', ['personalContrib', 'employerMatch']);
-  savingsGroupRow('Personal Contribution', d => d.totalPersonalSavings, 'personalContrib');
-  row('Roth IRA', d => d.sRoth, 'indent2', '', 'personalContrib');
-  row('HSA', d => d.sHSA, 'indent2', '', 'personalContrib');
-  row('401(k) Roth', d => d.s401k, 'indent2', '', 'personalContrib');
-  savingsGroupRow('Employer Match', d => d.totalMatchSavings, 'employerMatch');
-  row('HSA', d => d.mHSA, 'indent2', '', 'employerMatch');
-  row('401(k) Pre-tax', d => d.m401k, 'indent2', '', 'employerMatch');
+  savingsGroupRow('Personal Contribution', d => d.totalPersonalSavings, 'personalContrib', 'personalContrib');
+  row('Roth IRA', d => d.sRoth, 'indent2', '', 'personalContrib', 'sRoth');
+  row('HSA', d => d.sHSA, 'indent2', '', 'personalContrib', 'sHSA');
+  row('401(k) Roth', d => d.s401k, 'indent2', '', 'personalContrib', 's401k');
+  savingsGroupRow('Employer Match', d => d.totalMatchSavings, 'employerMatch', 'employerMatch');
+  row('HSA', d => d.mHSA, 'indent2', '', 'employerMatch', 'mHSA');
+  row('401(k) Pre-tax', d => d.m401k, 'indent2', '', 'employerMatch', 'm401k');
   subtotalRow('Total Savings', d => d.totalSavings);
   spacer();
   keyRow('Income for Living', d => d.incomeForLiving);
   spacer();
   sect('EXPENSES', ['healthcare', 'housing', 'transportation', 'food', 'personal']);
-  expenseCategoryRow('Healthcare', d => d.totalHealthcare, 'healthcare');
-  row('Premiums', d => d.premiums, 'indent2', '', 'healthcare');
-  row('Healthcare Services', d => d.hcServices, 'indent2', '', 'healthcare');
-  row('Other', d => d.hcOther, 'indent2', '', 'healthcare');
-  expenseCategoryRow('Housing', d => d.totalHousing, 'housing');
-  row('Rent', d => d.rent, 'indent2', '', 'housing');
-  row('Utilities', d => d.utilities, 'indent2', '', 'housing');
-  row('Maintenance/Other', d => d.housingOther, 'indent2', '', 'housing');
-  expenseCategoryRow('Transportation', d => d.totalTransport, 'transportation');
-  row('Gas', d => d.gas, 'indent2', '', 'transportation');
-  row('Insurance', d => d.carIns, 'indent2', '', 'transportation');
-  row('Maintenance/Other', d => d.transportOther, 'indent2', '', 'transportation');
-  expenseCategoryRow('Food', d => d.totalFood, 'food');
-  row('Groceries', d => d.groceries, 'indent2', '', 'food');
-  row('Restaurants', d => d.restaurants, 'indent2', '', 'food');
-  expenseCategoryRow('Personal', d => d.totalPersonal, 'personal');
-  row('Personal Items', d => d.personalItems, 'indent2', '', 'personal');
-  row('Entertainment', d => d.entertainment, 'indent2', '', 'personal');
-  row('Travel', d => d.travel, 'indent2', '', 'personal');
-  row('Subscriptions', d => d.subscriptions, 'indent2', '', 'personal');
+  expenseCategoryRow('Healthcare', d => d.totalHealthcare, 'healthcare', 'totalHealthcare');
+  row('Premiums', d => d.premiums, 'indent2', '', 'healthcare', 'premiums');
+  row('Healthcare Services', d => d.hcServices, 'indent2', '', 'healthcare', 'hcServices');
+  row('Other', d => d.hcOther, 'indent2', '', 'healthcare', 'hcOther');
+  expenseCategoryRow('Housing', d => d.totalHousing, 'housing', 'totalHousing');
+  row('Rent', d => d.rent, 'indent2', '', 'housing', 'rent');
+  row('Utilities', d => d.utilities, 'indent2', '', 'housing', 'utilities');
+  row('Maintenance/Other', d => d.housingOther, 'indent2', '', 'housing', 'housingOther');
+  expenseCategoryRow('Transportation', d => d.totalTransport, 'transportation', 'totalTransport');
+  row('Gas', d => d.gas, 'indent2', '', 'transportation', 'gas');
+  row('Insurance', d => d.carIns, 'indent2', '', 'transportation', 'carIns');
+  row('Maintenance/Other', d => d.transportOther, 'indent2', '', 'transportation', 'transportOther');
+  expenseCategoryRow('Food', d => d.totalFood, 'food', 'totalFood');
+  row('Groceries', d => d.groceries, 'indent2', '', 'food', 'groceries');
+  row('Restaurants', d => d.restaurants, 'indent2', '', 'food', 'restaurants');
+  expenseCategoryRow('Personal', d => d.totalPersonal, 'personal', 'totalPersonal');
+  row('Personal Items', d => d.personalItems, 'indent2', '', 'personal', 'personalItems');
+  row('Entertainment', d => d.entertainment, 'indent2', '', 'personal', 'entertainment');
+  row('Travel', d => d.travel, 'indent2', '', 'personal', 'travel');
+  row('Subscriptions', d => d.subscriptions, 'indent2', '', 'personal', 'subscriptions');
   const lotToggleHtml = `<span onclick="window._excludeLargeOneTime=!window._excludeLargeOneTime;renderIS();" title="Toggle large one-time expenses" style="display:inline-flex;align-items:center;margin-left:8px;cursor:pointer;vertical-align:middle;">
     <span style="width:24px;height:14px;border-radius:7px;background:${window._excludeLargeOneTime ? 'var(--surface2)' : 'var(--accent)'};border:1px solid ${window._excludeLargeOneTime ? 'var(--border)' : 'var(--accent)'};position:relative;display:inline-block;flex-shrink:0;">
       <span style="width:10px;height:10px;border-radius:50%;background:white;position:absolute;top:1px;left:${window._excludeLargeOneTime ? '1px' : '11px'};"></span>
@@ -2743,9 +2921,9 @@ function renderIS() {
     const lotHidden = isCollapsed('personal') ? 'display:none;' : '';
     rows.push(`<tr data-ismember="personal" style="opacity:0.75;${lotHidden}"><td class="row-label indent2" style="color:var(--text3);">Large One-time${lotToggleHtml}</td>${lotVals.map(v=>greyCell(v)).join('')}${showTotal ? greyTotalCell(lotTot) : ''}</tr>`);
   } else {
-    row('Large One-time', d => d.largeOneTime, 'indent2', lotToggleHtml, 'personal');
+    row('Large One-time', d => d.largeOneTime, 'indent2', lotToggleHtml, 'personal', 'largeOneTime');
   }
-  expenseCategoryRow('Miscellaneous', d => d.misc);
+  expenseCategoryRow('Miscellaneous', d => d.misc, '', 'misc');
   subtotalRow('Total Expenses', d => d.totalExpenses);
   spacer();
   totalRow('REMAINING', d => d.remaining);
