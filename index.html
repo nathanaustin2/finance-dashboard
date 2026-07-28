@@ -2655,12 +2655,26 @@ function openISDrill(key, monthKeys) {
   const rowsHtml = items.map(it => {
     const t = it.tx;
     const isNeg = it.amt < 0;
-    const catBits = [t.category, t.subcategory].filter(Boolean).join(' / ');
+    let catBits, descBits;
+    if (t.type === 'Savings') {
+      // Savings rows read as accounts: Category column = the account ("Ally's Roth IRA",
+      // "Elevate 401k", "Lively HSA"), Description column = the contribution category.
+      const subPretty = ({'ROTH IRA':'Roth IRA','401k':'401(k)','HSA':'HSA'})[t.subcategory] || t.subcategory || '';
+      const note = (t.notes || '').trim();
+      if (note === 'Nate' || note === 'Ally') catBits = `${note}'s ${subPretty}`;
+      else if (note && note !== 'Employer' && !/withdraw/i.test(note))
+        catBits = new RegExp((t.subcategory||'').replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'i').test(note) ? note : `${note} ${subPretty}`;
+      else catBits = subPretty;
+      descBits = (t.category || '') + (t.category==='Withdrawal' ? ' <span style="font-size:10px;color:var(--red);">(withdrawal)</span>' : '');
+    } else {
+      catBits = [t.category, t.subcategory].filter(Boolean).join(' / ');
+      descBits = ((t.notes||'').replace(/</g,'&lt;')) || '<span style="color:var(--text3);">—</span>';
+    }
     return `<tr>
       ${multi ? `<td style="font-family:var(--font-mono);font-size:11px;color:var(--text3);white-space:nowrap;">${mkLabel(it.mk)}</td>` : ''}
       <td style="font-family:var(--font-mono);font-size:12px;color:var(--text2);white-space:nowrap;">${fmtDateDisplay(t.date, it.mk)}</td>
-      <td style="font-size:12px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px;">${catBits}${t.category==='Withdrawal' ? ' <span style="font-size:10px;color:var(--red);">(withdrawal)</span>' : ''}</td>
-      <td style="font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;max-width:200px;">${(t.notes||'').replace(/</g,'&lt;') || '<span style="color:var(--text3);">—</span>'}</td>
+      <td style="font-size:12px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px;">${catBits}</td>
+      <td style="font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;max-width:200px;">${descBits}</td>
       <td style="font-family:var(--font-mono);font-size:12px;text-align:right;white-space:nowrap;color:${isNeg?'var(--red)':'var(--text)'};">${isNeg?'−':''}${fmt(Math.abs(it.amt))}</td>
     </tr>`;
   }).join('');
