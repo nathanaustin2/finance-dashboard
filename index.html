@@ -1030,7 +1030,7 @@
   <!-- Full-width editable income statement -->
   <div class="card" style="padding:0;overflow:hidden;margin-bottom:20px;">
     <table class="fin-table" id="proj-table">
-      <thead><tr><th>Line Item</th><th>Monthly</th><th>Annual</th><th>% of Gross</th></tr></thead>
+      <thead><tr><th></th><th>Monthly</th><th>Annual</th><th>% of Gross</th></tr></thead>
       <tbody id="proj-tbody"></tbody>
     </table>
   </div>
@@ -5583,20 +5583,31 @@ function computeScenarioCols(scId, horizon) {
   }
 }
 
-// Line items shown in the comparison table. `good` marks whether a positive delta is favourable —
-// taxes/tithing/expenses are inverted, since a bigger number there isn't an improvement.
+// Comparison line items — mirrors the scenario editor's income statement layout.
+// Taxes stay a single line (the federal/state/payroll split isn't carried on forecast columns);
+// savings are broken out per account. `good` marks whether a positive delta is favourable.
+// kind: 'sect' section band | 'total' subtotal | 'key' highlighted | 'final' bottom line.
 const CMP_ROWS = [
-  { label:'Gross income',      get:c=>c.grossIncome,     good:+1 },
-  { label:'Taxes',             get:c=>c.taxes,           good:-1, indent:true },
-  { label:'Tithing',           get:c=>c.tithing,         good:-1, indent:true },
-  { label:'Net income',        get:c=>c.netIncome,       good:+1, sub:true },
-  { label:'Personal savings',  get:c=>c.personalSavings, good:+1 },
-  { label:'Employer match',    get:c=>c.matchSavings,    good:+1, indent:true },
-  { label:'Total savings',     get:c=>c.totalSavings,    good:+1, sub:true },
-  { label:'Income for living', get:c=>c.incomeForLiving, good:+1 },
-  { label:'Total expenses',    get:c=>c.expenses,        good:-1 },
-  { label:'Remaining',         get:c=>c.remaining,       good:+1, sub:true },
-  { label:'Net worth',         get:c=>c.netWorth,        good:+1, key:true },
+  { sect:'INCOME' },
+  { label:'Gross income',     get:c=>c.grossIncome,     good:+1, kind:'total' },
+  { label:'Taxes',            get:c=>c.taxes,           good:-1, indent:true },
+  { label:'Net income',       get:c=>c.netIncome,       good:+1, kind:'total' },
+  { label:'Tithing',          get:c=>c.tithing,         good:-1, indent:true },
+  { sect:'SAVINGS' },
+  { label:"Nate's Roth IRA",  get:c=>c.fRothNate,       good:+1, indent:true },
+  { label:"Ally's Roth IRA",  get:c=>c.fRothAlly,       good:+1, indent:true },
+  { label:'HSA',              get:c=>c.fHsa,            good:+1, indent:true },
+  { label:'401k',             get:c=>c.f401k,           good:+1, indent:true },
+  { label:'Personal savings', get:c=>c.personalSavings, good:+1, kind:'total' },
+  { label:'HSA match',        get:c=>c.fMatchHsa,       good:+1, indent:true },
+  { label:'401(k) match',     get:c=>c.fMatch401k,      good:+1, indent:true },
+  { label:'Total w/ match',   get:c=>c.totalSavings,    good:+1, kind:'total' },
+  { label:'Income for living',get:c=>c.incomeForLiving, good:+1, kind:'key' },
+  { sect:'EXPENSES' },
+  { label:'Total expenses',   get:c=>c.expenses,        good:-1, indent:true },
+  { label:'Remaining surplus',get:c=>c.remaining,       good:+1, kind:'total' },
+  { sect:'NET WORTH' },
+  { label:'Projected net worth', get:c=>c.netWorth,     good:+1, kind:'final' },
 ];
 
 // How far past the anchor the comparison month list runs.
@@ -5611,6 +5622,13 @@ function cmpState() {
 function cmpHorizon() {
   const la = getLatestActualMonth();
   return { year: la.year + CMP_HORIZON_YEARS, month: la.month };
+}
+
+// Default comparison month: January of the year after the latest actual month (e.g. with actuals
+// through Jun 2026, this is Jan 2027). Always inside the horizon, since projections start the
+// month after the anchor and run CMP_HORIZON_YEARS out.
+function cmpDefaultMonthKey() {
+  return `${getLatestActualMonth().year + 1}-01`;
 }
 
 function closeScenarioCompare() {
@@ -5638,10 +5656,10 @@ function openScenarioCompare() {
 function onCmpChange() {
   const st = cmpState();
   const aEl = document.getElementById('cmp-a'), bEl = document.getElementById('cmp-b'),
-        mEl = document.getElementById('cmp-month');
+        mEl = document.getElementById('cmp-month'), yEl = document.getElementById('cmp-year');
   if (aEl) st.a = aEl.value;
   if (bEl) st.b = bEl.value;
-  if (mEl) st.monthKey = mEl.value;
+  if (mEl && yEl) st.monthKey = `${yEl.value}-${String(mEl.value).padStart(2,'0')}`;
   renderScenarioCompare();
 }
 
@@ -5692,8 +5710,22 @@ function renderScenarioCompare() {
   // Only months both scenarios project. These are future months by construction.
   const byKey = new Map(colsB.map(c => [c.key, c]));
   const months = colsA.filter(c => byKey.has(c.key));
-  if (!st.monthKey || !months.some(c => c.key === st.monthKey)) {
-    st.monthKey = months[months.length - 1].key;   // default: furthest out
+  const availKeys = new Set(months.map(c => c.key));
+  // Validate / clamp the selection. If the chosen year+month isn't in range (e.g. after switching
+  // to a year that only partially overlaps the horizon), snap to the nearest month in that year
+  // rather than jumping the user somewhere unrelated.
+  if (!st.monthKey || !availKeys.has(st.monthKey)) {
+    const [wy, wm] = (st.monthKey || '').split('-').map(Number);
+    let picked = null;
+    if (wy) {
+      const inYear = months.filter(c => c.year === wy);
+      if (inYear.length) {
+        picked = inYear.reduce((best, c) =>
+          Math.abs(c.month - wm) < Math.abs(best.month - wm) ? c : best, inYear[0]).key;
+      }
+    }
+    const dflt = cmpDefaultMonthKey();
+    st.monthKey = picked || (availKeys.has(dflt) ? dflt : months[months.length - 1].key);
   }
   const A = months.find(c => c.key === st.monthKey);
   const B = byKey.get(st.monthKey);
@@ -5702,29 +5734,38 @@ function renderScenarioCompare() {
   const colLabel = c => `${MONTHS[c.month-1]} ${c.year}`;
   const scOpts = sel => scenarios.map(s =>
     `<option value="${s.id}"${s.id===sel?' selected':''}>${s.name}</option>`).join('');
-  const monthOpts = months.map(c =>
-    `<option value="${c.key}"${c.key===st.monthKey?' selected':''}>${colLabel(c)}</option>`).join('');
+
+  // Split date picker: month + year. Months unavailable in the selected year are disabled
+  // rather than hidden, so the list stays in a stable, familiar Jan–Dec order.
+  const selY = A.year, selM = A.month;
+  const years = [...new Set(months.map(c => c.year))].sort((a,b) => a-b);
+  const monthOpts = MONTHS.map((nm, i) => {
+    const m = i + 1;
+    const ok = availKeys.has(`${selY}-${String(m).padStart(2,'0')}`);
+    return `<option value="${m}"${m===selM?' selected':''}${ok?'':' disabled'}>${nm}</option>`;
+  }).join('');
+  const yearOpts = years.map(y =>
+    `<option value="${y}"${y===selY?' selected':''}>${y}</option>`).join('');
 
   const selStyle = 'border:1px solid var(--border);background:var(--surface);border-radius:6px;' +
     'padding:5px 8px;font-family:var(--font-body);font-size:12px;color:var(--text);cursor:pointer;';
 
   const deltaCell = (d, good) => {
-    if (Math.abs(d) < 0.5) return `<td style="text-align:right;padding:7px 16px 7px 8px;color:var(--text3);">\u2014</td>`;
+    if (Math.abs(d) < 0.5) return `<td style="color:var(--text3);">\u2014</td>`;
     const col = ((d > 0 ? 1 : -1) === good) ? 'var(--accent)' : 'var(--red)';
-    return `<td style="text-align:right;padding:7px 16px 7px 8px;font-family:var(--font-mono);font-size:12px;color:${col};">${d>0?'+':'\u2212'}${fmt(Math.abs(d))}</td>`;
+    return `<td style="color:${col};">${d>0?'+':'\u2212'}${fmt(Math.abs(d))}</td>`;
   };
 
   const bodyRows = CMP_ROWS.map(r => {
+    if (r.sect) return `<tr class="section-header"><td colspan="4">${r.sect}</td></tr>`;
     const a = r.get(A) || 0, b = r.get(B) || 0;
-    const strong = r.key ? 'font-weight:600;' : (r.sub ? 'font-weight:500;' : '');
-    const bg = (r.key || r.sub) ? 'background:var(--surface2);' : '';
-    const pad = r.indent ? 'padding-left:28px;' : '';
-    return `<tr style="${bg}">
-      <td style="padding:7px 8px 7px 16px;font-size:12px;color:var(--text2);${pad}${strong}">${r.label}</td>
-      <td style="text-align:right;padding:7px 8px;font-family:var(--font-mono);font-size:12px;${strong}">${fmt(a)}</td>
-      <td style="text-align:right;padding:7px 8px;font-family:var(--font-mono);font-size:12px;${strong}">${fmt(b)}</td>
-      ${deltaCell(b - a, r.good)}
-    </tr>`;
+    if (r.kind === 'key')
+      return `<tr class="is-key-row"><td><strong>${r.label}</strong></td>` +
+             `<td><strong>${fmt(a)}</strong></td><td><strong>${fmt(b)}</strong></td>` +
+             deltaCell(b-a, r.good).replace('<td','<td class="cmp-delta"') + `</tr>`;
+    const cls = r.kind === 'total' ? ' class="subtotal"' : (r.kind === 'final' ? ' class="total-row"' : '');
+    const tdCls = r.indent ? ' class="indent"' : '';
+    return `<tr${cls}><td${tdCls}>${r.label}</td><td>${fmt(a)}</td><td>${fmt(b)}</td>${deltaCell(b-a, r.good)}</tr>`;
   }).join('');
 
   const nwDelta = (B.netWorth||0) - (A.netWorth||0);
@@ -5747,14 +5788,15 @@ function renderScenarioCompare() {
       <select id="cmp-b" onchange="onCmpChange()" style="${selStyle}">${scOpts(st.b)}</select>
       <span style="font-size:12px;color:var(--text3);margin-left:8px;">at</span>
       <select id="cmp-month" onchange="onCmpChange()" style="${selStyle}">${monthOpts}</select>
+      <select id="cmp-year" onchange="onCmpChange()" style="${selStyle}">${yearOpts}</select>
     </div>
     <div style="overflow-y:auto;">
-      <table style="width:100%;border-collapse:collapse;table-layout:fixed;">
-        <thead><tr style="position:sticky;top:0;background:var(--surface2);">
-          <th style="text-align:left;padding:7px 8px 7px 16px;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text3);font-weight:500;width:32%;"></th>
-          <th style="text-align:right;padding:7px 8px;font-size:11px;color:var(--text2);font-weight:600;overflow:hidden;text-overflow:ellipsis;">${nameOf(st.a)}</th>
-          <th style="text-align:right;padding:7px 8px;font-size:11px;color:var(--text2);font-weight:600;overflow:hidden;text-overflow:ellipsis;">${nameOf(st.b)}</th>
-          <th style="text-align:right;padding:7px 16px 7px 8px;font-size:11px;color:var(--text3);font-weight:500;width:22%;">Difference</th>
+      <table class="fin-table" id="cmp-table">
+        <thead><tr>
+          <th></th>
+          <th>${nameOf(st.a)}</th>
+          <th>${nameOf(st.b)}</th>
+          <th>Difference</th>
         </tr></thead>
         <tbody>${bodyRows}</tbody>
       </table>
@@ -6129,6 +6171,13 @@ function renderForecast(computeOnly = false, horizonOverride = null) {
       hasEvents: hasEventsForMonth(key),
       grossIncome: proj.grossIncome, taxes: proj.taxes, netIncome: ni,
       tithing: proj.tithing, personalSavings: ps, matchSavings: ms, totalSavings: ps+ms,
+      // Per-line savings FLOWS (distinct from the runBal.* balances below), so the scenario
+      // comparison can break savings out the same way the scenario editor does. proj.roth is a
+      // combined figure split evenly between the two Roth IRAs; rothNate/rothAlly are overrides.
+      fRothNate: (proj.roth||0)/2 + (proj.rothNate||0),
+      fRothAlly: (proj.roth||0)/2 + (proj.rothAlly||0),
+      fHsa: proj.hsa || 0, f401k: proj.s401k || 0,
+      fMatchHsa: proj.matchHsa || 0, fMatch401k: proj.m401k || 0,
       incomeForLiving: ifl, expenses: proj.expenses, remaining: rem,
       savings: runBal.savings, efund: runBal.efund, checking: runBal.checking,
       nateroth: runBal.nateroth, allyroth: runBal.allyroth,
