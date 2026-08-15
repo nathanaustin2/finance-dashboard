@@ -659,6 +659,9 @@
 
     <!-- LEFT: IS table + balance table -->
     <div>
+      <div style="display:flex;align-items:center;margin-bottom:10px;">
+        <button class="btn btn-secondary" style="font-size:12px;padding:5px 10px;margin-left:auto;" onclick="openScenarioCompare()">Compare scenarios</button>
+      </div>
       <div class="card" style="padding:0;overflow:hidden;margin-bottom:16px;">
         <div style="overflow-x:auto;">
           <table class="fin-table is-monthly-table" id="fc-table">
@@ -5556,16 +5559,226 @@ function hasEventsForMonth(monthKey) {
 }
 
 // ---- Main render ----
-function renderForecast() {
-  seedForecastDefaults();
+// ===================== SCENARIO COMPARISON =====================
+// Compute a full projection for ANY saved scenario by temporarily making it active and running
+// the same engine the main table uses (computeOnly = no DOM writes). State is always restored in
+// a finally block so a mid-run error can't strand the app on the wrong scenario.
+// Note: investment/cash return rates are global (not per-scenario), so both sides of a comparison
+// share identical market assumptions — the difference is purely the scenario's own inputs/events.
+function computeScenarioCols(scId, horizon) {
+  const sc = scenarios.find(s => s.id === scId);
+  if (!sc) return null;
+  const savedId = activeScenarioId;
+  const savedEvents = fcEvents;
+  try {
+    activeScenarioId = scId;
+    fcEvents = sc.events ? sc.events.map(e => ({ ...e })) : [];
+    return renderForecast(true, horizon);
+  } catch (err) {
+    console.error('Scenario comparison failed for', sc.name, err);
+    return null;
+  } finally {
+    activeScenarioId = savedId;
+    fcEvents = savedEvents;
+  }
+}
 
-  const det = document.getElementById('fc-assumptions-details');
-  if (det && !det._chevronBound) {
-    det._chevronBound = true;
-    det.addEventListener('toggle', () => {
-      const ch = document.getElementById('fc-assump-chevron');
-      if (ch) ch.style.transform = det.open ? 'rotate(90deg)' : 'rotate(0deg)';
-    });
+// Line items shown in the comparison table. `good` marks whether a positive delta is favourable —
+// taxes/tithing/expenses are inverted, since a bigger number there isn't an improvement.
+const CMP_ROWS = [
+  { label:'Gross income',      get:c=>c.grossIncome,     good:+1 },
+  { label:'Taxes',             get:c=>c.taxes,           good:-1, indent:true },
+  { label:'Tithing',           get:c=>c.tithing,         good:-1, indent:true },
+  { label:'Net income',        get:c=>c.netIncome,       good:+1, sub:true },
+  { label:'Personal savings',  get:c=>c.personalSavings, good:+1 },
+  { label:'Employer match',    get:c=>c.matchSavings,    good:+1, indent:true },
+  { label:'Total savings',     get:c=>c.totalSavings,    good:+1, sub:true },
+  { label:'Income for living', get:c=>c.incomeForLiving, good:+1 },
+  { label:'Total expenses',    get:c=>c.expenses,        good:-1 },
+  { label:'Remaining',         get:c=>c.remaining,       good:+1, sub:true },
+  { label:'Net worth',         get:c=>c.netWorth,        good:+1, key:true },
+];
+
+// How far past the anchor the comparison month list runs.
+const CMP_HORIZON_YEARS = 5;
+
+function cmpState() {
+  if (!window._cmpState) window._cmpState = { a:null, b:null, monthKey:null };
+  return window._cmpState;
+}
+
+// End date for comparison projections: CMP_HORIZON_YEARS past the latest actual month.
+function cmpHorizon() {
+  const la = getLatestActualMonth();
+  return { year: la.year + CMP_HORIZON_YEARS, month: la.month };
+}
+
+function closeScenarioCompare() {
+  const el = document.getElementById('cmp-overlay');
+  if (el) el.remove();
+  document.removeEventListener('keydown', cmpOnKey, true);
+  const st = cmpState(); st.open = false;
+}
+function cmpOnKey(e) { if (e.key === 'Escape') closeScenarioCompare(); }
+
+function openScenarioCompare() {
+  const st = cmpState();
+  if (st.open) { closeScenarioCompare(); return; }
+  st.open = true;
+  const overlay = document.createElement('div');
+  overlay.id = 'cmp-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(26,23,20,0.35);z-index:10000;' +
+    'display:flex;align-items:center;justify-content:center;padding:20px;';
+  overlay.addEventListener('mousedown', e => { if (e.target === overlay) closeScenarioCompare(); });
+  document.body.appendChild(overlay);
+  document.addEventListener('keydown', cmpOnKey, true);
+  renderScenarioCompare();
+}
+
+function onCmpChange() {
+  const st = cmpState();
+  const aEl = document.getElementById('cmp-a'), bEl = document.getElementById('cmp-b'),
+        mEl = document.getElementById('cmp-month');
+  if (aEl) st.a = aEl.value;
+  if (bEl) st.b = bEl.value;
+  if (mEl) st.monthKey = mEl.value;
+  renderScenarioCompare();
+}
+
+function renderScenarioCompare() {
+  const overlay = document.getElementById('cmp-overlay');
+  if (!overlay) return;
+  const st = cmpState();
+
+  const shell = (inner) => `
+    <div style="background:var(--surface);border-radius:12px;box-shadow:0 20px 50px rgba(26,23,20,.25);
+                max-width:720px;width:100%;max-height:85vh;display:flex;flex-direction:column;overflow:hidden;">
+      ${inner}
+    </div>`;
+  const closeBtn = `<button onclick="closeScenarioCompare()" title="Close" style="background:var(--surface);
+      border:1px solid var(--border);border-radius:5px;color:var(--text2);font-size:12px;font-weight:600;
+      line-height:1;padding:5px 9px;cursor:pointer;">&#x2715;</button>`;
+
+  if (scenarios.length < 2) {
+    overlay.innerHTML = shell(`
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:0.5px solid var(--border);">
+        <div style="font-family:var(--font-display);font-size:16px;">Compare scenarios</div>${closeBtn}
+      </div>
+      <div style="padding:20px 16px;font-size:12px;color:var(--text2);">
+        Add a second scenario to compare. Use <strong>+ Add Scenario</strong> on the Projection tab, set its
+        income and assumptions, then reopen this.
+      </div>`);
+    return;
+  }
+
+  if (!st.a || !scenarios.some(s=>s.id===st.a)) st.a = activeScenarioId || scenarios[0].id;
+  if (!st.b || !scenarios.some(s=>s.id===st.b) || st.b === st.a)
+    st.b = (scenarios.find(s => s.id !== st.a) || scenarios[0]).id;
+
+  const hz = cmpHorizon();
+  const colsA = computeScenarioCols(st.a, hz);
+  const colsB = computeScenarioCols(st.b, hz);
+  if (!colsA || !colsB || !colsA.length || !colsB.length) {
+    overlay.innerHTML = shell(`
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:0.5px solid var(--border);">
+        <div style="font-family:var(--font-display);font-size:16px;">Compare scenarios</div>${closeBtn}
+      </div>
+      <div style="padding:20px 16px;font-size:12px;color:var(--red);">
+        Couldn't compute the comparison. Check that both scenarios have valid assumptions.
+      </div>`);
+    return;
+  }
+
+  // Only months both scenarios project. These are future months by construction.
+  const byKey = new Map(colsB.map(c => [c.key, c]));
+  const months = colsA.filter(c => byKey.has(c.key));
+  if (!st.monthKey || !months.some(c => c.key === st.monthKey)) {
+    st.monthKey = months[months.length - 1].key;   // default: furthest out
+  }
+  const A = months.find(c => c.key === st.monthKey);
+  const B = byKey.get(st.monthKey);
+
+  const nameOf = id => (scenarios.find(s=>s.id===id) || {}).name || '\u2014';
+  const colLabel = c => `${MONTHS[c.month-1]} ${c.year}`;
+  const scOpts = sel => scenarios.map(s =>
+    `<option value="${s.id}"${s.id===sel?' selected':''}>${s.name}</option>`).join('');
+  const monthOpts = months.map(c =>
+    `<option value="${c.key}"${c.key===st.monthKey?' selected':''}>${colLabel(c)}</option>`).join('');
+
+  const selStyle = 'border:1px solid var(--border);background:var(--surface);border-radius:6px;' +
+    'padding:5px 8px;font-family:var(--font-body);font-size:12px;color:var(--text);cursor:pointer;';
+
+  const deltaCell = (d, good) => {
+    if (Math.abs(d) < 0.5) return `<td style="text-align:right;padding:7px 16px 7px 8px;color:var(--text3);">\u2014</td>`;
+    const col = ((d > 0 ? 1 : -1) === good) ? 'var(--accent)' : 'var(--red)';
+    return `<td style="text-align:right;padding:7px 16px 7px 8px;font-family:var(--font-mono);font-size:12px;color:${col};">${d>0?'+':'\u2212'}${fmt(Math.abs(d))}</td>`;
+  };
+
+  const bodyRows = CMP_ROWS.map(r => {
+    const a = r.get(A) || 0, b = r.get(B) || 0;
+    const strong = r.key ? 'font-weight:600;' : (r.sub ? 'font-weight:500;' : '');
+    const bg = (r.key || r.sub) ? 'background:var(--surface2);' : '';
+    const pad = r.indent ? 'padding-left:28px;' : '';
+    return `<tr style="${bg}">
+      <td style="padding:7px 8px 7px 16px;font-size:12px;color:var(--text2);${pad}${strong}">${r.label}</td>
+      <td style="text-align:right;padding:7px 8px;font-family:var(--font-mono);font-size:12px;${strong}">${fmt(a)}</td>
+      <td style="text-align:right;padding:7px 8px;font-family:var(--font-mono);font-size:12px;${strong}">${fmt(b)}</td>
+      ${deltaCell(b - a, r.good)}
+    </tr>`;
+  }).join('');
+
+  const nwDelta = (B.netWorth||0) - (A.netWorth||0);
+
+  overlay.innerHTML = shell(`
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:0.5px solid var(--border);gap:12px;">
+      <div>
+        <div style="font-family:var(--font-display);font-size:16px;color:var(--text);">Compare scenarios</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:2px;">${nameOf(st.a)} vs ${nameOf(st.b)} at ${colLabel(A)}</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px;">
+        <span style="font-family:var(--font-mono);font-size:15px;font-weight:500;color:${nwDelta>=0?'var(--accent)':'var(--red)'};">
+          ${nwDelta>=0?'+':'\u2212'}${fmt(Math.abs(nwDelta))}
+        </span>${closeBtn}
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;padding:10px 16px;border-bottom:0.5px solid var(--border);flex-wrap:wrap;">
+      <select id="cmp-a" onchange="onCmpChange()" style="${selStyle}">${scOpts(st.a)}</select>
+      <span style="font-size:12px;color:var(--text3);">vs</span>
+      <select id="cmp-b" onchange="onCmpChange()" style="${selStyle}">${scOpts(st.b)}</select>
+      <span style="font-size:12px;color:var(--text3);margin-left:8px;">at</span>
+      <select id="cmp-month" onchange="onCmpChange()" style="${selStyle}">${monthOpts}</select>
+    </div>
+    <div style="overflow-y:auto;">
+      <table style="width:100%;border-collapse:collapse;table-layout:fixed;">
+        <thead><tr style="position:sticky;top:0;background:var(--surface2);">
+          <th style="text-align:left;padding:7px 8px 7px 16px;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text3);font-weight:500;width:32%;"></th>
+          <th style="text-align:right;padding:7px 8px;font-size:11px;color:var(--text2);font-weight:600;overflow:hidden;text-overflow:ellipsis;">${nameOf(st.a)}</th>
+          <th style="text-align:right;padding:7px 8px;font-size:11px;color:var(--text2);font-weight:600;overflow:hidden;text-overflow:ellipsis;">${nameOf(st.b)}</th>
+          <th style="text-align:right;padding:7px 16px 7px 8px;font-size:11px;color:var(--text3);font-weight:500;width:22%;">Difference</th>
+        </tr></thead>
+        <tbody>${bodyRows}</tbody>
+      </table>
+      <div style="padding:8px 16px;border-top:0.5px solid var(--border);font-size:11px;color:var(--text3);">
+        Monthly flows for ${colLabel(A)}; net worth is the projected balance at that month.
+        Both scenarios project forward from your latest actual balances using the same return assumptions.
+      </div>
+    </div>`);
+}
+
+// performs no DOM writes and returns the computed columns instead of rendering. The scenario
+// comparison uses this so both scenarios go through the exact same engine as the main table.
+function renderForecast(computeOnly = false, horizonOverride = null) {
+  if (!computeOnly) {
+    seedForecastDefaults();
+
+    const det = document.getElementById('fc-assumptions-details');
+    if (det && !det._chevronBound) {
+      det._chevronBound = true;
+      det.addEventListener('toggle', () => {
+        const ch = document.getElementById('fc-assump-chevron');
+        if (ch) ch.style.transform = det.open ? 'rotate(90deg)' : 'rotate(0deg)';
+      });
+    }
   }
 
   const def = getFcDefaults();
@@ -5657,15 +5870,31 @@ function renderForecast() {
     elevate:  lb.elevate  || 8257.57,
     hsa:      lb.hsa      || 4411.02,
   };
-  anchorCol.netWorth = anchorCol.nateroth + anchorCol.allyroth + anchorCol.elevate +
-    (lb.voya||3653.37) + anchorCol.hsa + anchorCol.savings + anchorCol.efund + anchorCol.checking;
   anchorCol.carfund = lb.carfund || 23000;
   anchorCol.voya    = lb.voya || 3653.37;
+  // Projection-tab net worth INCLUDES the car fund in every column. The forecast columns roll
+  // the car fund forward as a cash balance, so excluding it here made the first forecast month
+  // jump by the car-fund balance. The Balance Sheet and the rest of the dashboard continue to
+  // report net worth EXCLUDING the car fund — this inclusion is scoped to the Projection tab.
+  anchorCol.netWorth = anchorCol.nateroth + anchorCol.allyroth + anchorCol.elevate +
+    anchorCol.voya + anchorCol.hsa + anchorCol.savings + anchorCol.efund +
+    anchorCol.carfund + anchorCol.checking;
 
   // ---- Build column definitions based on mode ----
   const fcDefs = [];
 
-  if (fcMode === 'fullyear') {
+  if (horizonOverride) {
+    // Comparison mode: project from the month after the anchor through an explicit end date,
+    // independent of the main table's horizon controls. Future months only, so the comparison
+    // can look further out than the table is currently showing.
+    let fsm = anchorMonth + 1, fsy = anchorYear;
+    if (fsm > 12) { fsm = 1; fsy++; }
+    while (fsy < horizonOverride.year || (fsy === horizonOverride.year && fsm <= horizonOverride.month)) {
+      fcDefs.push({ year: fsy, month: fsm, isActualMonth: false });
+      fsm++; if (fsm > 12) { fsm = 1; fsy++; }
+      if (fcDefs.length > 120) break; // safety cap at 10 years
+    }
+  } else if (fcMode === 'fullyear') {
     // Jan through Dec of anchor year; months <= anchor are actual, rest are forecast
     for (let m = 1; m <= 12; m++) {
       fcDefs.push({ year: anchorYear, month: m, isActualMonth: m <= anchorMonth });
@@ -5694,7 +5923,7 @@ function renderForecast() {
   // Running balances — for full year mode, seed from the month before Jan of anchor year
   // For forward12, seed from anchor as before
   let runBal;
-  if (fcMode === 'fullyear') {
+  if (!horizonOverride && fcMode === 'fullyear') {
     // Find balance at Dec of prior year, or use anchor balances as fallback
     const priorYearKey = `${anchorYear - 1}-12`;
     const priorBal = data.balances[priorYearKey] || {};
@@ -5908,7 +6137,9 @@ function renderForecast() {
   });
 
   // In Full Year mode the anchor is redundant — actuals are embedded in fcCols
-  const allCols = fcMode === 'fullyear' ? fcCols : [anchorCol, ...fcCols];
+  const allCols = horizonOverride ? fcCols
+    : (fcMode === 'fullyear' ? fcCols : [anchorCol, ...fcCols]);
+  if (computeOnly) return allCols;   // math done — skip all rendering
   window._lastForecastCols = fcCols; // cache for goals projected completion
   const n = allCols.length;
 
@@ -6056,6 +6287,9 @@ function renderForecast() {
   totRowBal('Net Worth',  c=>c.netWorth, prevNW);
 
   document.getElementById('fc-tbody').innerHTML = rows.join('');
+
+  // If the comparison modal is open, refresh it so scenario edits show immediately.
+  if (document.getElementById('cmp-overlay')) renderScenarioCompare();
 }
 
 
