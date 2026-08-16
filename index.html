@@ -4967,12 +4967,18 @@ function addScenario() {
 
 let renamingId = null;
 function startRename(id) {
-  renamingId = id;
   const sc = scenarios.find(s => s.id === id);
+  if (!sc) return;
+  // Make the clicked scenario active BEFORE opening the popup. The editor renders from the loaded
+  // form (i.e. the active scenario), so without this the popup showed the clicked scenario's name
+  // over the previously-active scenario's data. switchScenario() also captures any unsaved edits
+  // to the outgoing scenario first, and no-ops when the clicked scenario is already active.
+  if (id !== activeScenarioId) switchScenario(id);
+  renamingId = id;
   const bar = document.getElementById('scenario-rename-bar');
   const inp = document.getElementById('scenario-rename-input');
   const delBtn = document.getElementById('scenario-delete-btn');
-  if (!bar || !inp || !sc) return;
+  if (!bar || !inp) return;
   openAssumptionsPopup();
   inp.value = sc.name;
   bar.style.display = 'flex';
