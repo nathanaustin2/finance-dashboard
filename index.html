@@ -539,7 +539,7 @@
 </div>
 
 <!-- ==================== BALANCE SHEET ==================== -->
-<div class="page" id="page-balance" onclick="if(!event.target.closest('.bs-acct-row')&&selectedBsAcct){selectedBsAcct=null;selectedBsLabel='Net Worth';document.querySelectorAll('.bs-acct-row').forEach(r=>r.classList.remove('selected'));const d=loadData();renderBSTrend(d,document.getElementById('bs-month').value);}">
+<div class="page" id="page-balance" onclick="bsPageClick(event)">
   <div class="section-row">
     <h2>Balance Sheet</h2>
     <div style="display:flex;gap:8px;align-items:center;">
@@ -1497,6 +1497,10 @@ function _trendPopupKeyHandler(e) {
 function renderTrendPopupChart() {
   const data = loadData();
   if (!_trendPopupState.selVal) return;
+  // Derive the title from the live selection each render, so it can never disagree with the
+  // series being plotted.
+  const titleEl = document.getElementById('trend-popup-title');
+  if (titleEl) titleEl.textContent = selectedBsAccts.length ? `${bsSeriesLabel()} trend` : 'Net Worth Trend';
   renderBSTrend(data, _trendPopupState.selVal, 'trend-popup-chart', _trendPopupState.months);
 }
 
@@ -3429,9 +3433,13 @@ function renderBS() {
 
   // Wire click events via delegation (avoids inline JS with special chars)
   document.getElementById('bs-tbody').querySelectorAll('.bs-acct-row').forEach(row => {
-    row.addEventListener('click', () => {
-      bsSelectAcct(row.dataset.acct, row.dataset.label);
+    row.addEventListener('click', (e) => {
+      // Ctrl (Windows/Linux) or Cmd (Mac) adds/removes this account from the selection.
+      bsSelectAcct(row.dataset.acct, row.dataset.label, e.ctrlKey || e.metaKey);
     });
+    // Re-rendering the table replaces the rows, so re-apply the highlight for any account that
+    // is still selected (e.g. after changing the balance-sheet month).
+    row.classList.toggle('selected', selectedBsAccts.includes(row.dataset.acct));
   });
 
   const usInvest  = (cur.nateroth||0) + (cur.allyroth||0) + (cur.hsa||0);
@@ -4073,26 +4081,78 @@ function renderGoals(cur, selVal) {
     </div>`;
 }
 
-let selectedBsAcct = null;
-let selectedBsLabel = 'Net Worth';
+// Balance-sheet trend selection. Multi-select: ctrl/cmd+click adds or removes accounts, a plain
+// click selects just that one, and clicking empty space clears back to Net Worth.
+let selectedBsAccts  = [];   // account keys, in click order
+let selectedBsLabels = [];   // parallel display labels
 
-function bsSelectAcct(key, label) {
-  if (selectedBsAcct === key) {
-    // Deselect — go back to net worth
-    selectedBsAcct = null;
-    selectedBsLabel = 'Net Worth';
+// Subtotal rows expand to their constituent accounts, so selecting e.g. "Total Investments"
+// together with "Nate's Roth IRA" sums each underlying account once instead of double-counting.
+const BS_LEAF_KEYS = {
+  totalcash: ['checking','efund','savings'],
+  invest:    ['nateroth','allyroth','elevate','voya','hsa'],
+};
+function bsExpandKeys(keys) {
+  const out = new Set();
+  keys.forEach(k => (BS_LEAF_KEYS[k] || [k]).forEach(x => out.add(x)));
+  return [...out];
+}
+// Combined balance for the current selection in a given month; net worth when nothing is selected.
+function bsSeriesValue(b) {
+  if (!selectedBsAccts.length) {
+    return (b.checking||0)+(b.efund||0)+(b.savings||0)+
+           (b.nateroth||0)+(b.allyroth||0)+(b.elevate||0)+(b.voya||0)+(b.hsa||0);
+  }
+  return bsExpandKeys(selectedBsAccts).reduce((s,k) => s + (b[k]||0), 0);
+}
+// Chart/card title for the current selection.
+function bsSeriesLabel() {
+  if (!selectedBsLabels.length) return 'Net Worth';
+  if (selectedBsLabels.length <= 3) return selectedBsLabels.join(' + ');
+  return `${selectedBsLabels.length} accounts`;
+}
+
+// Clicking empty space on the Balance Sheet clears the account selection. This must NOT fire for
+// clicks on interactive controls, because those clicks bubble up here too. The ⛶ expand button is
+// the important case: it opens the trend popup and then the same click bubbled here and wiped the
+// selection, so the popup kept the "<Account> trend" title while every later range change silently
+// re-rendered as Net Worth. The month picker had the same problem.
+function bsPageClick(e) {
+  if (!selectedBsAccts.length) return;
+  // Account rows manage selection themselves.
+  if (e.target.closest('.bs-acct-row')) return;
+  // Any control or the trend chart/popup: leave the selection alone.
+  if (e.target.closest('button, select, input, textarea, a, label, .card-title, #bs-trend, #trend-popup-overlay')) return;
+  selectedBsAccts = [];
+  selectedBsLabels = [];
+  document.querySelectorAll('.bs-acct-row').forEach(r => r.classList.remove('selected'));
+  const d = loadData();
+  const mEl = document.getElementById('bs-month');
+  if (mEl && mEl.value) renderBSTrend(d, mEl.value);
+}
+
+// additive = ctrl/cmd was held: toggle this account within the current selection.
+// Otherwise: plain click selects only this account (or clears it if it was the sole selection).
+function bsSelectAcct(key, label, additive) {
+  const at = selectedBsAccts.indexOf(key);
+  if (additive) {
+    if (at >= 0) { selectedBsAccts.splice(at,1); selectedBsLabels.splice(at,1); }
+    else { selectedBsAccts.push(key); selectedBsLabels.push(label); }
+  } else if (at >= 0 && selectedBsAccts.length === 1) {
+    selectedBsAccts = []; selectedBsLabels = [];      // deselect — back to net worth
   } else {
-    selectedBsAcct = key;
-    selectedBsLabel = label;
+    selectedBsAccts = [key]; selectedBsLabels = [label];
   }
   // Update row highlight
   document.querySelectorAll('.bs-acct-row').forEach(r => {
-    r.classList.toggle('selected', r.dataset.acct === selectedBsAcct);
+    r.classList.toggle('selected', selectedBsAccts.includes(r.dataset.acct));
   });
-  // Re-render trend with new selection
+  // Re-render trend with new selection (and the popup too, if it's open)
   const data = loadData();
   const selVal = document.getElementById('bs-month').value;
   renderBSTrend(data, selVal);
+  const ov = document.getElementById('trend-popup-overlay');
+  if (ov && ov.style.display !== 'none' && typeof renderTrendPopupChart === 'function') renderTrendPopupChart();
 }
 
 function renderBSTrend(data, selVal, targetId, numMonths) {
@@ -4113,15 +4173,7 @@ function renderBSTrend(data, selVal, targetId, numMonths) {
     const b = data.balances[k];
     if (!b) return null;
     let v;
-    if (selectedBsAcct === 'totalcash') {
-      v = (b.checking||0)+(b.efund||0)+(b.savings||0);
-    } else if (selectedBsAcct === 'invest') {
-      v = (b.nateroth||0)+(b.allyroth||0)+(b.elevate||0)+(b.voya||0)+(b.hsa||0);
-    } else if (selectedBsAcct) {
-      v = b[selectedBsAcct] || 0;
-    } else {
-      v = (b.checking||0)+(b.efund||0)+(b.savings||0)+(b.nateroth||0)+(b.allyroth||0)+(b.elevate||0)+(b.voya||0)+(b.hsa||0);
-    }
+    v = bsSeriesValue(b);
     return { key: k, val: v };
   }).filter(Boolean);
 
@@ -4130,7 +4182,7 @@ function renderBSTrend(data, selVal, targetId, numMonths) {
     const trendCard = document.querySelector('#bs-trend')?.closest('.card');
     if (trendCard) {
       const titleEl = trendCard.querySelector('.card-title');
-      if (titleEl) titleEl.textContent = selectedBsAcct ? `${selectedBsLabel} trend` : 'Net Worth Trend';
+      if (titleEl) titleEl.textContent = selectedBsAccts.length ? `${bsSeriesLabel()} trend` : 'Net Worth Trend';
     }
   }
   if (points_data.length < 2) {
@@ -4158,7 +4210,7 @@ function renderBSTrend(data, selVal, targetId, numMonths) {
   const niceStep = Math.ceil(rawStep / (magnitude * 5)) * magnitude * 5;
   // For net worth (no account selected), start axis near the data minimum
   // For individual accounts, always floor to 0 so context is preserved
-  const gridMin = selectedBsAcct
+  const gridMin = selectedBsAccts.length
     ? Math.floor(minVal / niceStep) * niceStep
     : Math.floor((minVal - niceStep * 0.25) / niceStep) * niceStep;
   const gridMax = Math.ceil(maxVal / niceStep) * niceStep;
