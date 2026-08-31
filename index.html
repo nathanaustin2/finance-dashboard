@@ -423,8 +423,50 @@
 
   .is-key-row td { font-weight: 700; font-size: 13px; background: var(--accent-bg) !important; color: var(--accent); }
 </style>
+
+<!-- ============ FIREBASE SDK (compat build - works with plain inline scripts) ============ -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<style>
+  #fb-gate{position:fixed;inset:0;z-index:100000;background:var(--bg,#faf8f5);display:flex;
+    align-items:center;justify-content:center;text-align:center;font-family:'DM Sans',sans-serif;}
+  #fb-gate .fb-card{max-width:420px;padding:40px 32px;}
+  #fb-sync{display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--text3,#999);
+    white-space:nowrap;font-family:'DM Mono',monospace;}
+  #fb-sync .dot{width:7px;height:7px;border-radius:50%;background:#7a9a6d;flex:none;}
+  #fb-sync.saving .dot{background:#c9a227;animation:fbpulse 1s infinite;}
+  #fb-sync.error  .dot{background:#8B2020;}
+  @keyframes fbpulse{0%,100%{opacity:1}50%{opacity:.25}}
+  #fb-remote{position:fixed;left:50%;transform:translateX(-50%);bottom:24px;z-index:99999;display:none;
+    background:#2f4858;color:#fff;padding:11px 18px;border-radius:8px;font-size:13px;
+    font-family:'DM Sans',sans-serif;box-shadow:0 4px 20px rgba(0,0,0,.25);align-items:center;gap:14px;}
+  #fb-remote button{background:#fff;color:#2f4858;border:none;border-radius:5px;padding:5px 12px;
+    font-weight:600;font-size:12px;cursor:pointer;font-family:inherit;}
+</style>
 </head>
 <body>
+<div id="fb-gate">
+  <div class="fb-card">
+    <div style="font-family:'DM Serif Display',serif;font-size:32px;margin-bottom:6px;color:var(--text,#1a1a1a);">
+      Nate <span style="color:var(--accent,#8B6F47);">&amp;</span> Ally
+    </div>
+    <div style="font-size:13px;color:var(--text3,#888);margin-bottom:36px;letter-spacing:.04em;text-transform:uppercase;">
+      Personal Financial Dashboard
+    </div>
+    <div id="fb-gate-body">
+      <div style="font-size:13px;color:var(--text3,#999);">Connecting&hellip;</div>
+    </div>
+  </div>
+</div>
+
+<div id="fb-remote">
+  <span id="fb-remote-msg">The dashboard was updated on another device.</span>
+  <button onclick="location.reload()">Reload</button>
+  <button onclick="document.getElementById('fb-remote').style.display='none'"
+          style="background:transparent;color:#cbd5dd;">Later</button>
+</div>
+
 
 <div class="header">
   <div>
@@ -1072,6 +1114,9 @@
       <button class="btn btn-secondary" onclick="exportDashboardData()" style="font-size:12px;padding:5px 12px;" title="Download all your dashboard data as a backup file">⬇ Export Data</button>
       <button class="btn btn-secondary" onclick="document.getElementById('import-data-input').click()" style="font-size:12px;padding:5px 12px;" title="Restore data from a previously exported backup file">⬆ Import Data</button>
       <input type="file" id="import-data-input" accept=".json" style="display:none;" onchange="importDashboardData(this)">
+      <span id="fb-sync" title="Cloud sync status"><span class="dot"></span><span id="fb-sync-text">synced</span></span>
+      <button class="btn btn-secondary" id="fb-signout" onclick="FirebaseSync.signOut()"
+              style="font-size:12px;padding:5px 12px;" title="Sign out of the dashboard">Sign out</button>
     </div>
   </div>
 
@@ -1650,10 +1695,24 @@ function applyTrendCustomRange() {
 // =====================================================================
 const STORAGE_KEY = 'nate_ally_finance_v2';
 
+// ---------------------------------------------------------------------
+// CLOUD DATA LAYER
+// The whole app calls loadData()/saveData() synchronously, so we keep the
+// authoritative dataset in an in-memory cache (window._fsCache) that is
+// hydrated from Firestore once at sign-in. Writes update the cache
+// instantly, mirror to localStorage as an offline backup, and push to
+// Firestore on a short debounce. See FirebaseSync at the bottom of the file.
+// ---------------------------------------------------------------------
 function loadData() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    const data = raw ? JSON.parse(raw) : {};
+    let data = window._fsCache;
+    if (!data) {
+      // Pre-hydration or cloud unavailable: fall back to the local mirror so
+      // the app can still render rather than throwing.
+      const raw = localStorage.getItem(STORAGE_KEY);
+      data = raw ? JSON.parse(raw) : {};
+      window._fsCache = data;
+    }
     if (!data.transactions)    data.transactions    = {};
     if (!data.balances)        data.balances        = {};
     if (!data.projAssumptions) data.projAssumptions = null;
@@ -1672,7 +1731,10 @@ function getDefaultGoals() {
 }
 
 function saveData(data) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  window._fsCache = data;
+  // Local mirror = offline backup. Never the source of truth once signed in.
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch(e) {}
+  if (window.FirebaseSync) window.FirebaseSync.queueWrite(data);
 }
 
 // Returns { year, month } of the most recent month that has meaningful IS data —
@@ -8926,15 +8988,19 @@ function init() {
   /* header-date removed */
 }
 
-try {
-  init();
-} catch(e) {
-  console.error('Dashboard init error:', e);
-  document.body.insertAdjacentHTML('afterbegin',
-    `<div style="background:#8B2020;color:white;padding:12px 20px;font-family:monospace;font-size:13px;z-index:9999;position:relative;">
-      ⚠ Dashboard error: ${e.message}. Check browser console (F12) for details.
-    </div>`);
-}
+// init() no longer runs on page load. FirebaseSync calls this once the user is
+// authenticated AND the dataset has been hydrated from Firestore.
+window.__bootDashboard = function() {
+  try {
+    init();
+  } catch(e) {
+    console.error('Dashboard init error:', e);
+    document.body.insertAdjacentHTML('afterbegin',
+      `<div style="background:#8B2020;color:white;padding:12px 20px;font-family:monospace;font-size:13px;z-index:9999;position:relative;">
+        ⚠ Dashboard error: ${e.message}. Check browser console (F12) for details.
+      </div>`);
+  }
+};
 
 // =====================================================================
 // GOAL EDITOR MODAL
@@ -9719,7 +9785,7 @@ function renderReturns() {
 // DATA EXPORT / IMPORT
 // =====================================================================
 function exportDashboardData() {
-  const raw = localStorage.getItem(STORAGE_KEY) || '{}';
+  const raw = JSON.stringify(window._fsCache || JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'));
   const now = new Date();
   const stamp = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
   const blob = new Blob([raw], { type: 'application/json' });
@@ -9740,9 +9806,13 @@ function importDashboardData(input) {
       const parsed = JSON.parse(e.target.result);
       if (typeof parsed !== 'object' || Array.isArray(parsed))
         throw new Error('Invalid format');
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
       input.value = '';
-      appAlert('✓ Data imported successfully. The page will now reload to apply your data.').then(() => location.reload());
+      // Push straight to the cloud so the import lands for both of you.
+      saveData(parsed);
+      const done = () => appAlert('✓ Data imported and synced to the cloud. The page will now reload.')
+                          .then(() => location.reload());
+      if (window.FirebaseSync) window.FirebaseSync.flush().then(done).catch(done);
+      else done();
     } catch(err) {
       appAlert('Import failed — the file doesn\'t look like a valid dashboard export. (' + err.message + ')');
     }
@@ -9761,6 +9831,252 @@ async function deleteGoal() {
   closeGoalModal();
   renderBS();
 }
+</script>
+
+
+<!-- ===================================================================
+     FIREBASE SYNC LAYER
+     Single shared document, hydrated once into window._fsCache.
+     =================================================================== -->
+<script>
+(function () {
+  'use strict';
+
+  var firebaseConfig = {
+    apiKey:            "AIzaSyDLNlJEaSMlvt2EoKpaXT2ZaTgV0g4jQ08",
+    authDomain:        "personal-finance-dashboa-66e95.firebaseapp.com",
+    projectId:         "personal-finance-dashboa-66e95",
+    storageBucket:     "personal-finance-dashboa-66e95.firebasestorage.app",
+    messagingSenderId: "320047397296",
+    appId:             "1:320047397296:web:38cc7d36a613f0bc6dbe75"
+  };
+
+  // ONE shared document for the household. Hardcoded on purpose: whoever signs
+  // in, Nate or Ally, reads and writes this exact path. Access is enforced by
+  // the Firestore security rules, not by anything in this file.
+  var DOC_PATH = ['households', 'nate-ally', 'dashboard', 'data'];
+
+  var db, auth, docRef, unsub = null;
+  var booted = false, hydrated = false;
+  var writeTimer = null, pendingData = null, inFlight = null;
+  var lastPushed = null;      // last payload string we sent; used to ignore our own echoes
+  var WRITE_DEBOUNCE_MS = 1200;
+
+  // ---------- UI helpers ----------
+  function gate(html) {
+    var g = document.getElementById('fb-gate');
+    if (!g) return;
+    g.style.display = 'flex';
+    document.getElementById('fb-gate-body').innerHTML = html;
+  }
+  function hideGate() {
+    var g = document.getElementById('fb-gate');
+    if (g) g.style.display = 'none';
+  }
+  function status(state, text) {
+    var el = document.getElementById('fb-sync');
+    if (!el) return;
+    el.className = state;
+    var t = document.getElementById('fb-sync-text');
+    if (t) t.textContent = text;
+  }
+  function signInScreen(msg) {
+    gate(
+      (msg ? '<div style="font-size:13px;color:#8B2020;margin-bottom:20px;line-height:1.6;">' + msg + '</div>' : '') +
+      '<button id="fb-signin-btn" style="display:inline-flex;align-items:center;gap:12px;background:#fff;' +
+      'border:1.5px solid #dadce0;border-radius:8px;padding:12px 24px;cursor:pointer;font-size:15px;' +
+      'font-weight:500;color:#3c4043;box-shadow:0 1px 3px rgba(0,0,0,.08);font-family:inherit;">' +
+      '<svg width="20" height="20" viewBox="0 0 48 48"><path fill="#4285F4" d="M44.5 20H24v8.5h11.7C34.2 33.9 29.6 37 24 37c-7.2 0-13-5.8-13-13s5.8-13 13-13c3.1 0 5.9 1.1 8.1 2.9l6.4-6.4C34.6 4.1 29.6 2 24 2 11.8 2 2 11.8 2 24s9.8 22 22 22c11 0 21-8 21-22 0-1.3-.2-2.7-.5-4z"/><path fill="#34A853" d="M6.3 14.7l7 5.1C15 16.1 19.2 13 24 13c3.1 0 5.9 1.1 8.1 2.9l6.4-6.4C34.6 4.1 29.6 2 24 2c-7.6 0-14.2 4.4-17.7 10.7z"/><path fill="#FBBC05" d="M24 46c5.5 0 10.5-1.9 14.3-5l-6.6-5.4C29.6 37 26.9 38 24 38c-5.6 0-10.3-3.2-12.7-7.8l-7 5.4C8.1 41.7 15.5 46 24 46z"/><path fill="#EA4335" d="M44.5 20H24v8.5h11.7c-.6 2.7-2.3 5-4.7 6.5l6.6 5.4C41.7 37.3 45 31.1 45 24c0-1.3-.2-2.7-.5-4z"/></svg>' +
+      'Sign in with Google</button>' +
+      '<div style="font-size:11px;color:var(--text3,#aaa);margin-top:20px;line-height:1.6;">' +
+      'Access is restricted to authorized accounts.</div>'
+    );
+    document.getElementById('fb-signin-btn').onclick = function () {
+      var provider = new firebase.auth.GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: 'select_account' });
+      gate('<div style="font-size:13px;color:var(--text3,#999);">Opening Google sign-in&hellip;</div>');
+      auth.signInWithPopup(provider).catch(function (err) {
+        signInScreen(err.code === 'auth/popup-blocked'
+          ? 'Your browser blocked the sign-in popup. Allow popups for this site and try again.'
+          : 'Sign-in failed: ' + err.message);
+      });
+    };
+  }
+
+  // ---------- writes ----------
+  function queueWrite(data) {
+    pendingData = data;
+    status('saving', 'saving…');
+    if (writeTimer) clearTimeout(writeTimer);
+    writeTimer = setTimeout(pushNow, WRITE_DEBOUNCE_MS);
+  }
+
+  function pushNow() {
+    if (writeTimer) { clearTimeout(writeTimer); writeTimer = null; }
+    if (!pendingData || !docRef || !hydrated) return Promise.resolve();
+    var payload = JSON.stringify(pendingData);
+    pendingData = null;
+    if (payload === lastPushed) { status('', 'synced'); return Promise.resolve(); }
+    lastPushed = payload;
+    var u = auth.currentUser;
+    inFlight = docRef.set({
+      payload:   payload,
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      updatedBy: (u && (u.displayName || u.email)) || 'unknown'
+    }).then(function () {
+      status('', 'synced');
+    }).catch(function (err) {
+      console.error('Firestore write failed:', err);
+      lastPushed = null;
+      status('error', 'not saved to cloud');
+    });
+    return inFlight;
+  }
+
+  function flush() {
+    return Promise.resolve(pushNow()).then(function () { return inFlight; });
+  }
+
+  // Best-effort flush if the tab is closed with a debounce still pending.
+  window.addEventListener('beforeunload', function (e) {
+    if (pendingData || writeTimer) {
+      pushNow();
+      e.preventDefault();
+      e.returnValue = '';
+      return '';
+    }
+  });
+
+  // ---------- hydrate + live sync ----------
+  function startSync() {
+    gate('<div style="font-size:13px;color:var(--text3,#999);">Loading your dashboard&hellip;</div>');
+
+    docRef.get().then(function (snap) {
+      var cloudRaw = snap.exists ? snap.data().payload : null;
+
+      var localRaw = null;
+      try { localRaw = localStorage.getItem(STORAGE_KEY); } catch (e) {}
+      var localHasData = false;
+      try {
+        var lp = localRaw ? JSON.parse(localRaw) : null;
+        localHasData = !!(lp && lp.transactions && Object.keys(lp.transactions).length);
+      } catch (e) {}
+
+      if (!cloudRaw && localHasData) return offerMigration(localRaw);
+      if (!cloudRaw && !localHasData) {
+        window._fsCache = {};
+        hydrated = true;
+        lastPushed = null;
+        return finish();
+      }
+      try { window._fsCache = JSON.parse(cloudRaw); }
+      catch (e) { window._fsCache = {}; }
+      lastPushed = cloudRaw;
+      hydrated = true;
+      finish();
+    }).catch(function (err) {
+      if (err.code === 'permission-denied') {
+        auth.signOut();
+        signInScreen('That account is not authorized for this dashboard. Ask Nate to add it, then sign in again.');
+      } else {
+        console.error(err);
+        gate('<div style="font-size:13px;color:#8B2020;line-height:1.6;">Could not reach the database.<br>' +
+             (err.message || '') + '</div>');
+      }
+    });
+  }
+
+  function offerMigration(localRaw) {
+    var n = 0;
+    try { n = Object.keys(JSON.parse(localRaw).transactions || {}).length; } catch (e) {}
+    gate(
+      '<div style="font-size:14px;color:var(--text,#1a1a1a);line-height:1.65;margin-bottom:8px;font-weight:600;">' +
+      'Move this browser\u2019s data to the cloud?</div>' +
+      '<div style="font-size:13px;color:var(--text3,#888);line-height:1.65;margin-bottom:24px;">' +
+      'The cloud database is empty, but this browser has <b>' + n + ' months</b> of saved data. ' +
+      'Uploading makes it the shared copy you and Ally both see.</div>' +
+      '<button id="fb-mig-yes" class="btn" style="padding:9px 18px;font-size:13px;cursor:pointer;">Upload this data</button> ' +
+      '<button id="fb-mig-no" style="padding:9px 18px;font-size:13px;cursor:pointer;background:none;' +
+      'border:1px solid var(--border,#ddd);border-radius:6px;color:var(--text3,#888);font-family:inherit;">Start empty</button>'
+    );
+    document.getElementById('fb-mig-yes').onclick = function () {
+      gate('<div style="font-size:13px;color:var(--text3,#999);">Uploading&hellip;</div>');
+      try { window._fsCache = JSON.parse(localRaw); } catch (e) { window._fsCache = {}; }
+      hydrated = true;
+      lastPushed = null;
+      pendingData = window._fsCache;
+      pushNow().then(finish).catch(function (err) {
+        gate('<div style="font-size:13px;color:#8B2020;">Upload failed: ' + err.message + '</div>');
+      });
+    };
+    document.getElementById('fb-mig-no').onclick = function () {
+      window._fsCache = {};
+      hydrated = true;
+      lastPushed = null;
+      finish();
+    };
+  }
+
+  function finish() {
+    if (unsub) unsub();
+    // Live listener: pick up the other person's saves without a manual refresh.
+    unsub = docRef.onSnapshot(function (snap) {
+      if (!snap.exists || snap.metadata.hasPendingWrites) return;  // ignore our own echo
+      var incoming = snap.data().payload;
+      if (incoming === lastPushed) return;
+      lastPushed = incoming;
+      try { window._fsCache = JSON.parse(incoming); } catch (e) { return; }
+      try { localStorage.setItem(STORAGE_KEY, incoming); } catch (e) {}
+      var who = snap.data().updatedBy || 'Someone';
+      var msg = document.getElementById('fb-remote-msg');
+      // Deliberately does NOT re-render underneath you - that would wipe a form
+      // you are mid-way through filling in. You choose when to reload.
+      if (msg) msg.textContent = who.split(' ')[0] + ' just saved changes on another device.';
+      var bar = document.getElementById('fb-remote');
+      if (bar) bar.style.display = 'flex';
+    }, function (err) { console.error('Snapshot listener error:', err); });
+
+    if (!booted) {
+      booted = true;
+      hideGate();
+      window.__bootDashboard();
+      status('', 'synced');
+    }
+  }
+
+  // ---------- boot ----------
+  function boot() {
+    if (typeof firebase === 'undefined') {
+      gate('<div style="font-size:13px;color:#8B2020;line-height:1.6;">Could not load Firebase.<br>' +
+           'Check your internet connection and reload.</div>');
+      return;
+    }
+    firebase.initializeApp(firebaseConfig);
+    auth = firebase.auth();
+    db   = firebase.firestore();
+    docRef = db.collection(DOC_PATH[0]).doc(DOC_PATH[1]).collection(DOC_PATH[2]).doc(DOC_PATH[3]);
+
+    auth.onAuthStateChanged(function (user) {
+      if (!user) { hydrated = false; signInScreen(null); return; }
+      startSync();
+    });
+  }
+
+  window.FirebaseSync = {
+    queueWrite: queueWrite,
+    flush: flush,
+    signOut: function () {
+      flush().then(function () {
+        if (unsub) { unsub(); unsub = null; }
+        booted = false; hydrated = false;
+        auth.signOut().then(function () { location.reload(); });
+      });
+    }
+  };
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
+  else boot();
+})();
 </script>
 
 <!-- GOAL EDITOR MODAL -->
