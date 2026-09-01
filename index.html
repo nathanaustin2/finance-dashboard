@@ -3104,12 +3104,8 @@ function renderIS() {
       </div>`;
   }
 
-  // Contribution progress
-  const LIMITS = {
-    2024: { rothNate: 7000, rothAlly: 7000, k401: 23000, hsa: 4150 },
-    2025: { rothNate: 7000, rothAlly: 7000, k401: 23500, hsa: 4300 },
-    2026: { rothNate: 7500, rothAlly: 7500, k401: 24500, hsa: 4400 },
-  };
+  // Contribution progress (limits live at module scope — see CONTRIB_LIMITS)
+  const LIMITS = CONTRIB_LIMITS;
   const yearsInRange = [...new Set(periods.map(p => p.year))];
   const latestYear  = Math.max(...periods.map(p => p.year));
   const latestMonth = Math.max(...periods.filter(p => p.year === latestYear).map(p => p.month));
@@ -3155,22 +3151,15 @@ function renderIS() {
   // contribution is tax year 2026; etc. The dropdown stores explicit overrides on tx.taxYear.
   const rothByTaxYear = {};
   const rawDataAll = loadData();
-  Object.keys(rawDataAll.transactions || {}).forEach(monthKey => {
-    if (!/^\d{4}-\d{2}$/.test(monthKey)) return;
-    (rawDataAll.transactions[monthKey] || []).forEach(t => {
-      if (t.type !== 'Savings' || t.subcategory !== 'ROTH IRA') return;
-      if (t.category !== 'Personal Contribution') return;
-      const amt = parseFloat(t.amount) || 0;
-      const isAlly = (t.notes || '').toLowerCase().includes('ally');
-      const person = isAlly ? 'Ally' : 'Nate';
-      // Use stored override if present, else infer from date (or month key as fallback)
-      const stored = (t.taxYear !== undefined && t.taxYear !== null) ? parseInt(t.taxYear) : null;
-      const ty = stored !== null ? stored : rothTaxYear(t.date, person, monthKey);
-      if (ty === null) return;
-      if (!rothByTaxYear[ty]) rothByTaxYear[ty] = { rothNate: 0, rothAlly: 0 };
-      if (isAlly) rothByTaxYear[ty].rothAlly += amt;
-      else        rothByTaxYear[ty].rothNate += amt;
-    });
+  // Single source of truth: the resolver reads each row's stored taxYear stamp and
+  // only falls back to a room-aware default for rows that arrived unstamped.
+  const rothResolved = rothResolveTaxYears(rawDataAll);
+  Object.keys(rothResolved.totals).forEach(tyKey => {
+    const ty = parseInt(tyKey);
+    rothByTaxYear[ty] = {
+      rothNate: rothResolved.totals[tyKey].Nate,
+      rothAlly: rothResolved.totals[tyKey].Ally,
+    };
   });
   // Also fold in HISTORICAL_IS Roth values (these don't have explicit dates/overrides — assume calendar year = tax year)
   Object.keys(HISTORICAL_IS || {}).forEach(yrKey => {
@@ -3214,7 +3203,7 @@ function renderIS() {
   const srEl = document.getElementById('is-savings-rate');
   const renderYearContrib = (yr) => {
     const c   = contribByYear[yr] || { rothNate: 0, rothAlly: 0, k401: 0, hsa: 0 };
-    const lim = LIMITS[yr] || LIMITS[2026];
+    const lim = contribLimitsFor(yr);
     const isCurrentYear = yr === latestYear;
     const thruLabel = isCurrentYear ? ` thru ${MONTHS[latestMonth-1]}` : '';
     // Expected pace: for current year, pro-rated by month; for past years, full limit
@@ -3230,18 +3219,29 @@ function renderIS() {
     };
     const rowFn = (label, val, max) => {
       const paceVal = Math.round(val);
+      // Over-limit guardrail: an excess IRA/HSA contribution costs a 6% excise tax
+      // every year until it is removed, so surface it loudly rather than letting a
+      // full-looking progress bar hide it.
+      const over = paceVal > Math.round(max);
+      const amtColor = over ? 'var(--red)' : (paceVal >= max ? 'var(--accent)' : 'var(--text2)');
+      const overTag = over
+        ? `<span title="Over the ${yr} limit by ${fmt(val - max)} — excess contributions incur a 6% excise tax per year until corrected." style="margin-left:5px;font-size:9px;font-weight:700;letter-spacing:0.04em;color:var(--red);border:1px solid var(--red);border-radius:3px;padding:0 3px;">OVER ${fmt(val - max)}</span>`
+        : '';
       return `
       <div style="margin-bottom:10px;">
-        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:3px;">
-          <span style="font-size:11px;color:var(--text2);">${label}</span>
-          <span style="font-size:11px;font-family:var(--font-mono);color:${paceVal>=max?'var(--accent)':'var(--text2)'};">${fmt(val)} <span style="color:var(--text3);">/ ${fmt(max)}</span></span>
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:3px;gap:6px;">
+          <span style="font-size:11px;color:var(--text2);">${label}${overTag}</span>
+          <span style="font-size:11px;font-family:var(--font-mono);color:${amtColor};">${fmt(val)} <span style="color:var(--text3);">/ ${fmt(max)}</span></span>
         </div>
         ${bar(val, max, paceVal)}
       </div>`;
     };
+    const estTag = lim.est
+      ? `<span title="IRS has not published ${yr} limits yet — these are estimates. Update CONTRIB_LIMITS when the figures are released." style="margin-left:5px;font-size:9px;font-weight:700;color:var(--gold);border:1px solid var(--gold);border-radius:3px;padding:0 3px;">EST</span>`
+      : '';
     return `
       <div style="flex:1;min-width:0;">
-        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--text3);margin-bottom:10px;">${yr}${thruLabel}</div>
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--text3);margin-bottom:10px;">${yr}${thruLabel}${estTag}</div>
         ${rowFn("Nate's Roth IRA", c.rothNate, lim.rothNate)}
         ${rowFn("Ally's Roth IRA", c.rothAlly, lim.rothAlly)}
         ${rowFn('401(k)', c.k401, lim.k401)}
@@ -6637,37 +6637,143 @@ function toggleTxManageMode() {
   renderTxTable(loadData().transactions[currentEntryKey] || []);
 }
 
-// Compute the tax year for a Roth IRA contribution based on date.
-// Rules: Apr 15 cutoff — Jan 1 - Apr 15 contributions can be designated to prior tax year.
-// Per user's stated history:
-//   - Nate Jan-Apr 15 2024 → 2024 (no retro to 2023)
-//   - Nate Jan-Apr 15 2025 → 2024 (retroactive)
-//   - Nate Apr 16 2025 - Apr 15 2026 → 2025
-//   - Nate Apr 16 2026+ → 2026
-//   - Ally first contribution Dec 2025; Dec 2025 - Apr 15 2026 → 2025
-//   - 2023: own year only (no retro)
-function rothTaxYear(dateStr, person, fallbackMonthKey) {
-  // Parse via the shared parser (handles YYYY-MM-DD, M/D/YYYY, and "MMM D").
-  let p = parseStoredDate(dateStr, fallbackMonthKey);
-  if (!p && fallbackMonthKey && /^\d{4}-\d{2}$/.test(fallbackMonthKey)) {
-    // No date or unrecognized format — use the entry month, assume mid-month for the cutoff
-    p = { y: parseInt(fallbackMonthKey.slice(0, 4)), m: parseInt(fallbackMonthKey.slice(5, 7)), d: 15 };
+// =====================================================================
+// ROTH IRA TAX-YEAR ATTRIBUTION
+// =====================================================================
+// A contribution's tax year is a DECISION, not a derivation. Every Roth row
+// carries its own `taxYear` stamp — written when the row is created, by the
+// one-time backfill in migrateRothTaxYearStamps(), or by the user via the
+// dropdown. The resolver below only has to guess for rows that somehow arrive
+// unstamped, and its guess is room-aware rather than a fixed calendar rule.
+
+function rothIsRothRow(t) {
+  return !!t && t.type === 'Savings' && t.subcategory === 'ROTH IRA'
+             && t.category === 'Personal Contribution';
+}
+function rothPersonOf(t) {
+  return (t.notes || '').toLowerCase().includes('ally') ? 'Ally' : 'Nate';
+}
+function rothStampOf(t) {
+  if (!t || t.taxYear === undefined || t.taxYear === null || t.taxYear === '') return null;
+  const n = parseInt(t.taxYear);
+  return isNaN(n) ? null : n;
+}
+// Parse a row's date, falling back to mid-month of the entry key when the date
+// is missing or unrecognized (mid-month keeps it clear of the Apr 15 boundary).
+function rothParsedDate(t, monthKey) {
+  let p = parseStoredDate(t.date, monthKey);
+  if (!p && monthKey && /^\d{4}-\d{2}$/.test(monthKey)) {
+    p = { y: parseInt(monthKey.slice(0, 4)), m: parseInt(monthKey.slice(5, 7)), d: 15 };
   }
+  return p || null;
+}
+// Jan 1 - Apr 15 is the window in which a contribution MAY be designated to the
+// prior tax year. Whether it actually is depends on whether that year has room.
+function rothInCarryWindow(p) {
+  return !!p && (p.m < 4 || (p.m === 4 && p.d <= 15));
+}
+
+// LEGACY date-only inference. Encodes the verified 2023-2026 history:
+//   - Jan-Apr 15 2024 → 2024 (no retro to 2023)
+//   - Jan-Apr 15 2025 → 2024 (retroactive)
+//   - Apr 16 2025 - Apr 15 2026 → 2025
+//   - Ally's first contribution Dec 2025; Dec 2025 - Apr 15 2026 → 2025
+// USED ONLY by migrateRothTaxYearStamps() to backfill existing rows once.
+// Do NOT call this for new contributions: its unconditional "Jan-Apr goes to the
+// prior year" rule is correct only while a backlog exists, and silently
+// overfills the prior year the moment the backlog is cleared.
+function rothTaxYearLegacy(dateStr, fallbackMonthKey) {
+  const p = rothParsedDate({ date: dateStr }, fallbackMonthKey);
   if (!p) return null;
   const yr = p.y, mo = p.m, day = p.d;
   if (yr <= 2023) return yr;
-  if (yr === 2024) return 2024; // user's rule: no retro to 2023
-  // Year >= 2025: Jan-Apr 15 → prior year
+  if (yr === 2024) return 2024;
   if (mo < 4 || (mo === 4 && day <= 15)) return yr - 1;
   return yr;
+}
+
+// Resolve every Roth contribution in the dataset to a tax year.
+// Returns { keyed: { '<monthKey>|<index>': year }, totals: { year: {Nate, Ally} } }.
+// Order of operations matters:
+//   1. Stamped rows are facts — allocate them first, at their stated year.
+//   2. Unstamped rows are then resolved in DATE order, so each decision sees the
+//      running total of everything already allocated. A Jan-Apr 15 contribution
+//      lands in the prior year only if it still fits under that year's limit;
+//      otherwise it belongs to its own calendar year.
+function rothResolveTaxYears(data) {
+  const keyed  = {};
+  const totals = {};
+  const add = (yr, person, amt) => {
+    if (!totals[yr]) totals[yr] = { Nate: 0, Ally: 0 };
+    totals[yr][person] += amt;
+  };
+
+  const stamped = [], loose = [];
+  Object.keys((data && data.transactions) || {}).forEach(mk => {
+    if (!/^\d{4}-\d{2}$/.test(mk)) return;
+    (data.transactions[mk] || []).forEach((t, i) => {
+      if (!rothIsRothRow(t)) return;
+      const p = rothParsedDate(t, mk);
+      if (!p) return;
+      const rec = { key: mk + '|' + i, p, amt: parseFloat(t.amount) || 0, person: rothPersonOf(t) };
+      const s = rothStampOf(t);
+      if (s !== null) { rec.year = s; stamped.push(rec); } else { loose.push(rec); }
+    });
+  });
+
+  stamped.forEach(r => { keyed[r.key] = r.year; add(r.year, r.person, r.amt); });
+
+  loose.sort((a, b) => (a.p.y - b.p.y) || (a.p.m - b.p.m) || (a.p.d - b.p.d));
+  loose.forEach(r => {
+    let yr = r.p.y;
+    if (rothInCarryWindow(r.p)) {
+      const prior = r.p.y - 1;
+      const cap   = rothLimitFor(prior, r.person);
+      const used  = (totals[prior] && totals[prior][r.person]) || 0;
+      // 0.005 tolerance so float noise on cent-level amounts can't reject a fit.
+      if (cap > 0 && used + r.amt <= cap + 0.005) yr = prior;
+    }
+    keyed[r.key] = yr;
+    add(yr, r.person, r.amt);
+  });
+
+  return { keyed, totals };
+}
+
+// What the resolver WOULD choose for this row if it carried no stamp. Used by the
+// dropdown so the "overridden" highlight fires only on a genuine user override.
+// Temporarily strips the stamp in memory; never saves.
+function rothDefaultTaxYearFor(monthKey, idx) {
+  const data = loadData();
+  const rows = (data.transactions || {})[monthKey];
+  if (!rows || !rows[idx] || !rothIsRothRow(rows[idx])) return null;
+  const tx   = rows[idx];
+  const had  = Object.prototype.hasOwnProperty.call(tx, 'taxYear');
+  const prev = tx.taxYear;
+  if (had) delete tx.taxYear;
+  const resolved = rothResolveTaxYears(data);
+  if (had) tx.taxYear = prev;
+  const yr = resolved.keyed[monthKey + '|' + idx];
+  return yr === undefined ? null : yr;
+}
+
+// Stamp a freshly-created Roth row so its tax year is persisted at entry time
+// rather than re-derived later. `data` must already contain `tx`.
+function rothStampNewRow(tx, monthKey, data) {
+  if (!rothIsRothRow(tx) || rothStampOf(tx) !== null) return;
+  const rows = (data.transactions || {})[monthKey] || [];
+  const idx  = rows.indexOf(tx);
+  if (idx < 0) return;
+  const yr = rothResolveTaxYears(data).keyed[monthKey + '|' + idx];
+  if (yr !== undefined) tx.taxYear = yr;
 }
 
 // Render an editable tax-year dropdown for a Roth contribution row.
 // `txIndex` is the index in the txs array; the dropdown calls setRothTaxYear() on change.
 function rothTaxYearDropdown(tx, txIndex, person, fallbackMonthKey) {
   // Default value: stored taxYear if user has explicitly set one; else inferred
-  const inferred = rothTaxYear(tx.date, person, fallbackMonthKey);
-  const stored = tx.taxYear !== undefined && tx.taxYear !== null ? parseInt(tx.taxYear) : null;
+  const inferred = rothDefaultTaxYearFor(fallbackMonthKey, txIndex);
+  const stored = rothStampOf(tx);
   const current = stored !== null ? stored : inferred;
   if (current === null) return '';
   // Year options: current entry-year and previous year only
@@ -7062,6 +7168,32 @@ const DP_MON_IDX = { jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:1
 // Parse a stored date in ANY format the app has ever used into {y, m, d}:
 //   'YYYY-MM-DD' (migrated history), 'M/D/YYYY' (CSV + calendar), 'MMM D' (hand-typed).
 // For the year-less 'MMM D' form, infer the year from monthKey ('YYYY-MM'). Null if unparseable.
+// =====================================================================
+// CONTRIBUTION LIMITS
+// =====================================================================
+// Module scope so the Roth tax-year resolver can read them too.
+// `est: true` marks a year whose IRS figures have NOT been published yet —
+// the Service releases each year's numbers the preceding November. Replace
+// the estimate with the actual Rev. Proc. values and drop the flag.
+const CONTRIB_LIMITS = {
+  2024: { rothNate: 7000, rothAlly: 7000, k401: 23000, hsa: 4150 },
+  2025: { rothNate: 7000, rothAlly: 7000, k401: 23500, hsa: 4300 },
+  2026: { rothNate: 7500, rothAlly: 7500, k401: 24500, hsa: 4400 },
+  2027: { rothNate: 7500, rothAlly: 7500, k401: 25500, hsa: 4550, est: true },
+  2028: { rothNate: 8000, rothAlly: 8000, k401: 26500, hsa: 4700, est: true },
+};
+const CONTRIB_LIMIT_YEARS = Object.keys(CONTRIB_LIMITS).map(Number).sort((a, b) => a - b);
+// Fall back to the LATEST defined year, not a hardcoded one, so adding a year
+// to the table above is the only change ever needed.
+function contribLimitsFor(yr) {
+  return CONTRIB_LIMITS[yr] || CONTRIB_LIMITS[CONTRIB_LIMIT_YEARS[CONTRIB_LIMIT_YEARS.length - 1]];
+}
+function rothLimitFor(yr, person) {
+  const l = CONTRIB_LIMITS[yr];
+  if (!l) return 0; // unknown year => no room, contribution stays in its calendar year
+  return person === 'Ally' ? l.rothAlly : l.rothNate;
+}
+
 function parseStoredDate(raw, monthKey) {
   const s = (raw || '').trim();
   if (!s) return null;
@@ -7423,7 +7555,9 @@ function commitPendingRow(i) {
   if (!row || !currentEntryKey) return;
   const data = loadData();
   if (!data.transactions[currentEntryKey]) data.transactions[currentEntryKey] = [];
-  data.transactions[currentEntryKey].push({ ...row });
+  const newTx = { ...row };
+  data.transactions[currentEntryKey].push(newTx);
+  rothStampNewRow(newTx, currentEntryKey, data); // persist tax year at entry time
   saveData(data);
   txPendingRows.splice(i, 1);
   renderTxTable(data.transactions[currentEntryKey]);
@@ -7757,10 +7891,12 @@ function insertRecurringItems() {
     if (!t) return;
     const sig = `${t.type}|${t.category}|${t.subcategory}|${(t.notes||'').trim()}`.toLowerCase();
     if (existingSigs.has(sig)) return;
-    data.transactions[currentEntryKey].push({
+    const newTx = {
       type: t.type, category: t.category, subcategory: t.subcategory,
       amount: t.amount, notes: t.notes, date: `${currentEntryKey}-01`,
-    });
+    };
+    data.transactions[currentEntryKey].push(newTx);
+    rothStampNewRow(newTx, currentEntryKey, data); // persist tax year at entry time
     added++;
   });
 
@@ -8819,14 +8955,16 @@ function paystubConfirmImport() {
   const data = loadData();
   if (!data.transactions[currentEntryKey]) data.transactions[currentEntryKey] = [];
   paystubReviewRows.forEach(r => {
-    data.transactions[currentEntryKey].push({
+    const newTx = {
       type:        r.type,
       category:    r.category,
       subcategory: r.subcategory || '',
       amount:      String(r.amount),
       notes:       r.description,
       date:        r.date || '',
-    });
+    };
+    data.transactions[currentEntryKey].push(newTx);
+    rothStampNewRow(newTx, currentEntryKey, data); // persist tax year at entry time
   });
   saveData(data);
   loadEntryData(currentEntryKey);
@@ -8886,6 +9024,41 @@ function migrateBalanceEvents() {
     });
   }
   if (changed) saveData(data);
+}
+
+function migrateRothTaxYearStamps() {
+  // One-time backfill: write an explicit `taxYear` onto every existing Roth row so
+  // historical attribution stops depending on a date rule that has to change every
+  // time the household's contribution posture changes.
+  //
+  // The stamps are produced by rothTaxYearLegacy(), which encodes the verified
+  // 2023-2026 history. Verified against the 8/31/2026 export: 2025 closes at
+  // $7,000.00 for both Nate and Ally, 2026 stands at $1,250.00 each.
+  //
+  // ORDERING: must run AFTER migrateHistoricalToTransactions(), which overwrites
+  // 2024-01 through 2026-02 wholesale from its embedded ISINPUTS blob. If that
+  // migration's version flag is ever bumped past 3, it will wipe these stamps for
+  // those months — bump _rothTaxYearStamped at the same time to force a re-backfill.
+  const data = loadData();
+  if (data._rothTaxYearStamped === 1) return; // run once
+  let changed = false;
+  Object.keys(data.transactions || {}).forEach(mk => {
+    if (!/^\d{4}-\d{2}$/.test(mk)) return;
+    (data.transactions[mk] || []).forEach(t => {
+      if (!rothIsRothRow(t)) return;
+      if (rothStampOf(t) !== null) return; // never overwrite an explicit designation
+      const yr = rothTaxYearLegacy(t.date, mk);
+      if (yr === null) return;
+      t.taxYear = yr;
+      changed = true;
+    });
+  });
+  data._rothTaxYearStamped = 1;
+  saveData(data); // persist the flag even if nothing changed, so it won't re-scan
+  if (changed && typeof currentEntryKey !== 'undefined' && currentEntryKey) {
+    const txs = (loadData().transactions || {})[currentEntryKey];
+    if (txs && typeof renderTxTable === 'function') renderTxTable(txs);
+  }
 }
 
 function migrateHSAWithdrawals() {
@@ -8968,6 +9141,7 @@ function init() {
   migrateBalanceEvents();
   migrateHSAWithdrawals();
   migrateFastOfferingCategory();
+  migrateRothTaxYearStamps(); // must run after migrateHistoricalToTransactions()
 
   renderIS();
   // Default preset: T12 — set after renderIS so HISTORICAL_IS is available
