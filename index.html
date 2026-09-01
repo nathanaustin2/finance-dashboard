@@ -7168,6 +7168,11 @@ const DP_MON_IDX = { jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:1
 // Parse a stored date in ANY format the app has ever used into {y, m, d}:
 //   'YYYY-MM-DD' (migrated history), 'M/D/YYYY' (CSV + calendar), 'MMM D' (hand-typed).
 // For the year-less 'MMM D' form, infer the year from monthKey ('YYYY-MM'). Null if unparseable.
+// Build marker. Bump on every deploy. `console.info` prints it at boot, and
+// rothAudit() echoes it — so "is the new file actually live?" is answerable in
+// two seconds instead of a full export round-trip.
+const DASHBOARD_BUILD = '2026-09-01 roth-taxyear-stamps';
+
 // =====================================================================
 // CONTRIBUTION LIMITS
 // =====================================================================
@@ -7488,8 +7493,17 @@ function txEditSavingsAccount(span, i) {
     const acct = ACCOUNTS.find(a => a.label === sel.value);
     const d = loadData();
     if (acct && d.transactions[currentEntryKey] && d.transactions[currentEntryKey][i]) {
-      d.transactions[currentEntryKey][i].subcategory = acct.sub;
-      d.transactions[currentEntryKey][i].notes = acct.notes;
+      const row  = d.transactions[currentEntryKey][i];
+      const wasRoth   = rothIsRothRow(row);
+      const wasPerson = wasRoth ? rothPersonOf(row) : null;
+      row.subcategory = acct.sub;
+      row.notes = acct.notes;
+      // A row can be switched INTO a Roth account, OUT of one, or between Nate and
+      // Ally. Any of those invalidates an existing stamp, since the carry-back test
+      // is per-person. Drop the stale stamp, then re-resolve if it is still Roth.
+      const isRoth = rothIsRothRow(row);
+      if (!isRoth || (wasRoth && wasPerson !== rothPersonOf(row))) delete row.taxYear;
+      if (isRoth) rothStampNewRow(row, currentEntryKey, d);
       saveData(d);
     }
     renderTxTable(loadData().transactions[currentEntryKey] || []);
@@ -9040,19 +9054,39 @@ function migrateRothTaxYearStamps() {
   // migration's version flag is ever bumped past 3, it will wipe these stamps for
   // those months — bump _rothTaxYearStamped at the same time to force a re-backfill.
   const data = loadData();
-  if (data._rothTaxYearStamped === 1) return; // run once
-  let changed = false;
+  const firstRun = data._rothTaxYearStamped !== 1;
+
+  // After the first run, an unstamped Roth row is a bug, not history — some entry
+  // path created one without a stamp. Self-heal those using the room-aware
+  // resolver (NOT the legacy rule, which is only correct for the 2023-2026 backlog).
+  const orphans = [];
   Object.keys(data.transactions || {}).forEach(mk => {
     if (!/^\d{4}-\d{2}$/.test(mk)) return;
-    (data.transactions[mk] || []).forEach(t => {
-      if (!rothIsRothRow(t)) return;
-      if (rothStampOf(t) !== null) return; // never overwrite an explicit designation
+    (data.transactions[mk] || []).forEach((t, i) => {
+      if (rothIsRothRow(t) && rothStampOf(t) === null) orphans.push({ mk, i, t });
+    });
+  });
+  if (!firstRun && orphans.length === 0) return;
+
+  let changed = false;
+  if (firstRun) {
+    orphans.forEach(({ mk, t }) => {
       const yr = rothTaxYearLegacy(t.date, mk);
       if (yr === null) return;
       t.taxYear = yr;
       changed = true;
     });
-  });
+  } else {
+    const resolved = rothResolveTaxYears(data);
+    orphans.forEach(({ mk, i, t }) => {
+      const yr = resolved.keyed[mk + '|' + i];
+      if (yr === undefined) return;
+      t.taxYear = yr;
+      changed = true;
+    });
+    console.warn(`[roth] stamped ${changed ? orphans.length : 0} unstamped Roth row(s) via room-aware resolver`);
+  }
+
   data._rothTaxYearStamped = 1;
   saveData(data); // persist the flag even if nothing changed, so it won't re-scan
   if (changed && typeof currentEntryKey !== 'undefined' && currentEntryKey) {
@@ -9162,10 +9196,38 @@ function init() {
   /* header-date removed */
 }
 
+// Console diagnostic: `rothAudit()` in devtools. Confirms which build is live and
+// whether every Roth row carries a tax-year stamp, without an export round-trip.
+window.rothAudit = function () {
+  const data = loadData();
+  const rows = [];
+  Object.keys(data.transactions || {}).forEach(mk => {
+    if (!/^\d{4}-\d{2}$/.test(mk)) return;
+    (data.transactions[mk] || []).forEach((t, i) => {
+      if (rothIsRothRow(t)) rows.push({ mk, i, t, stamp: rothStampOf(t) });
+    });
+  });
+  const unstamped = rows.filter(r => r.stamp === null);
+  console.info('build:', DASHBOARD_BUILD, '| migration flag:', data._rothTaxYearStamped);
+  console.info(`Roth rows: ${rows.length} | stamped: ${rows.length - unstamped.length} | unstamped: ${unstamped.length}`);
+  if (unstamped.length) console.warn('unstamped:', unstamped.map(r => `${r.mk} ${r.t.date} ${r.t.amount} ${r.t.notes}`));
+  const totals = rothResolveTaxYears(data).totals;
+  const table = {};
+  Object.keys(totals).sort().forEach(yr => {
+    table[yr] = {
+      Nate: totals[yr].Nate, 'Nate limit': rothLimitFor(+yr, 'Nate') || '—',
+      Ally: totals[yr].Ally, 'Ally limit': rothLimitFor(+yr, 'Ally') || '—',
+    };
+  });
+  console.table(table);
+  return { build: DASHBOARD_BUILD, rows: rows.length, unstamped: unstamped.length, totals };
+};
+
 // init() no longer runs on page load. FirebaseSync calls this once the user is
 // authenticated AND the dataset has been hydrated from Firestore.
 window.__bootDashboard = function() {
   try {
+    console.info('Dashboard build:', DASHBOARD_BUILD);
     init();
   } catch(e) {
     console.error('Dashboard init error:', e);
