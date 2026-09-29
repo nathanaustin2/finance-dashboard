@@ -6393,26 +6393,30 @@ function renderForecast(computeOnly = false, horizonOverride = null) {
   spacer(); spacer();
 
   // ---- Balances ----
-  const prevKey2 = ['2026-01','2025-12','2025-11'].find(k=>data.balances[k]);
-  const pb = prevKey2 ? data.balances[prevKey2] : {};
-
-  const mkPrev = (field, fallback) => [pb[field]||fallback, ...allCols.slice(0,-1).map(c=>c[field])];
-  const prevCk = mkPrev('checking', 2631.62);
-  const prevE  = mkPrev('efund',    7500);
-  const prevS  = mkPrev('savings',  10209.30);
-  const prevCF = mkPrev('carfund',  23000);
-  const prevNR = mkPrev('nateroth', 33940.69);
-  const prevAR = mkPrev('allyroth', 1050.61);
-  const prevEL = mkPrev('elevate',  7472.43);
-  const prevH  = mkPrev('hsa',      4095.89);
-  const prevVY = mkPrev('voya',     3653.37);
-
-  // Total Cash and Total Investments prev arrays
-  const prevTC = allCols.map((_, i) => (i === 0 ? (pb.checking||2631.62)+(pb.efund||7500)+(pb.savings||10209.30)+(pb.carfund||23000)
-    : allCols[i-1].checking + allCols[i-1].efund + allCols[i-1].savings + allCols[i-1].carfund));
-  const prevTI = allCols.map((_, i) => (i === 0 ? (pb.nateroth||33940.69)+(pb.allyroth||1050.61)+(pb.hsa||4095.89)+(pb.elevate||7472.43)+(pb.voya||3653.37)
-    : allCols[i-1].nateroth + allCols[i-1].allyroth + allCols[i-1].hsa + allCols[i-1].elevate + allCols[i-1].voya));
-  const prevNW = [null, ...allCols.slice(0,-1).map(c=>c.netWorth)];
+  // Each balance cell shows a change vs the column to its LEFT. The leftmost column
+  // has nothing to its left, so its prev is null and no delta renders.
+  //
+  // This used to pin prevArr[0] to a fixed year-start snapshot (2026-01, falling back
+  // to 2025-12 / 2025-11). That was invisible in Full Year mode — the first column IS
+  // January, so the delta came out 0 and was swallowed by the 0.50 display threshold —
+  // but in Forward 12 and Custom the first column is the current actual month, so every
+  // account showed a spurious January-to-date change (e.g. Checking +$808.52, which is
+  // Aug 2026 minus Jan 2026, not a month-over-month move).
+  //
+  // Deriving every prev from allCols also drops nine hardcoded fallback constants that
+  // were stale snapshots of an older dataset.
+  const mkPrev = (fn) => [null, ...allCols.slice(0, -1).map(fn)];
+  const prevCk  = mkPrev(c => c.checking);
+  const prevE   = mkPrev(c => c.efund);
+  const prevSav = mkPrev(c => c.savings + c.carfund);
+  const prevNR  = mkPrev(c => c.nateroth);
+  const prevAR  = mkPrev(c => c.allyroth);
+  const prevEL  = mkPrev(c => c.elevate);
+  const prevH   = mkPrev(c => c.hsa);
+  const prevVY  = mkPrev(c => c.voya);
+  const prevTC  = mkPrev(c => c.checking + c.efund + c.savings + c.carfund);
+  const prevTI  = mkPrev(c => c.nateroth + c.allyroth + c.hsa + c.elevate + c.voya);
+  const prevNW  = mkPrev(c => c.netWorth);
 
   const balRow = (lbl, fn, prevArr) => rows.push(
     `<tr><td class="row-label indent">${lbl}</td>${allCols.map((c,i)=>vcBal(fn(c),c,prevArr[i])).join('')}</tr>`
@@ -6442,7 +6446,7 @@ function renderForecast(computeOnly = false, horizonOverride = null) {
   sect('CASH');
   balRow('Checking',       c=>c.checking, prevCk);
   balRow('Emergency Fund', c=>c.efund,    prevE);
-  balRow('Savings',        c=>c.savings + c.carfund, allCols.map((_, i) => (i === 0 ? (pb.savings||10209.30)+(pb.carfund||23000) : allCols[i-1].savings + allCols[i-1].carfund)));
+  balRow('Savings',        c=>c.savings + c.carfund, prevSav);
   subRow2('Total Cash',    c=>c.checking+c.efund+c.savings+c.carfund, prevTC);
 
   sect('INVESTMENTS');
@@ -7171,7 +7175,7 @@ const DP_MON_IDX = { jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:1
 // Build marker. Bump on every deploy. `console.info` prints it at boot, and
 // rothAudit() echoes it — so "is the new file actually live?" is answerable in
 // two seconds instead of a full export round-trip.
-const DASHBOARD_BUILD = '2026-09-01 roth-taxyear-stamps';
+const DASHBOARD_BUILD = '2026-09-01b roth-taxyear + fc-first-col-delta';
 
 // =====================================================================
 // CONTRIBUTION LIMITS
