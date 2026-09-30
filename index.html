@@ -3707,6 +3707,22 @@ function buildGoalForecastSeries() {
     const ifl = ni - proj.tithing - ps;
     const rem = ifl - proj.expenses;
 
+    // Capture the market/interest growth this month applies, per account, BEFORE the
+    // balances are advanced. Goal cards use this to report contributions separately from
+    // growth. Recording the engine's own numbers (rather than re-deriving them from a rate
+    // downstream) keeps the two in sync if these rates or formulas ever change.
+    const growthByKey = {
+      nateroth: runBal.nateroth * investG,
+      allyroth: runBal.allyroth * investG,
+      elevate:  runBal.elevate  * investG,
+      voya:     runBal.voya     * investG,
+      hsa:      runBal.hsa      * investG,
+      carfund:  runBal.carfund  * cashG,
+      savings:  runBal.savings  * cashG,
+      efund:    runBal.efund    * cashG,
+      checking: 0,
+    };
+
     runBal.nateroth = runBal.nateroth * (1+investG) + (proj.roth/2) + (proj.rothNate || 0);
     runBal.allyroth = runBal.allyroth * (1+investG) + (proj.roth/2) + (proj.rothAlly || 0);
     runBal.elevate  = runBal.elevate  * (1+investG) + proj.s401k + proj.m401k;
@@ -3782,7 +3798,7 @@ function buildGoalForecastSeries() {
 
     // cumulativePool = money contributed to the cash pool over time (unaffected by car purchases)
     const cumulativePool = runBal.savings + runBal.carfund + carSpent;
-    series.push({ key, year: y, month: m, cumulativePool, ...runBal });
+    series.push({ key, year: y, month: m, cumulativePool, growthByKey, ...runBal });
   }
   return series;
 }
@@ -3836,7 +3852,17 @@ function getGoalPoolValue(keys, src) {
   }, 0);
 }
 
-// Compute the average monthly contribution flowing into a goal from "now" (selVal) until projected completion.
+// Average monthly CONTRIBUTION into a goal from "now" (selVal) until projected completion.
+//
+// The projected balance path already includes modeled market/interest growth, so a naive
+// (end - start) / months reports the average monthly INCREASE IN VALUE, not what is being
+// contributed. That made the card's "Contrib/mo" incomparable with the "Need/mo" directly
+// below it, since Need/mo is a pure contribution requirement (growth on the existing balance
+// is handled separately by fvCurrent). It also inflated the figure materially — on the $100k
+// goal it read ~$3,755 when contributions were ~$3,159.
+//
+// Fix: subtract the growth the projection itself applied, month by month, over the same
+// window, using growthByKey recorded by buildGoalForecastSeries. No rate is assumed here.
 // Returns null if the goal has no projected completion or no months between now and completion.
 function getAvgContribToCompletion(g, series, projCompletion, selVal, current) {
   if (!projCompletion) return null;
@@ -3851,19 +3877,26 @@ function getAvgContribToCompletion(g, series, projCompletion, selVal, current) {
   // Car goals: measure average monthly increase in the cumulative cash pool (savings + carfund
   // + money spent on cars). This reflects genuine money flowing into the pool and is unaffected
   // by the car purchase drain, so it stays positive all the way to completion.
+  // Growth the projection applied to these accounts across the window (selVal, completion].
+  const growthOverWindow = (keys) => series.reduce((sum, pt) =>
+    (pt.key > selVal && pt.key <= compKey && pt.growthByKey)
+      ? sum + getGoalPoolValue(keys, pt.growthByKey)
+      : sum, 0);
+
   const isCarGoal = g.id === 'car1' || g.id === 'car2';
   if (isCarGoal) {
     const startCumulative = (current.savings || 0) + Math.max(0, current.carfund || 0);
     const endCumulative   = compPt.cumulativePool || 0;
-    return Math.max(0, (endCumulative - startCumulative) / monthsToComplete);
+    const contributed = (endCumulative - startCumulative) - growthOverWindow(['savings','carfund']);
+    return Math.max(0, contributed / monthsToComplete);
   }
 
   const keys = g.sourceKeys || ['savings'];
-  const endValue = getGoalPoolValue(keys, compPt);
+  const endValue   = getGoalPoolValue(keys, compPt);
   const startValue = getGoalPoolValue(keys, current);
-  const totalGrowth = endValue - startValue;
-  // Floor at 0 — a shrinking tracked pool shouldn't display as negative monthly saving.
-  return Math.max(0, totalGrowth / monthsToComplete);
+  const contributed = (endValue - startValue) - growthOverWindow(keys);
+  // Floor at 0 — a shrinking tracked pool shouldn't display as negative monthly contribution.
+  return Math.max(0, contributed / monthsToComplete);
 }
 
 function renderGoals(cur, selVal) {
@@ -4105,12 +4138,12 @@ function renderGoals(cur, selVal) {
           <div style="display:flex;flex-direction:column;gap:2px;padding:4px 0;"><div style="font-size:10px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text3);">Target</div><div style="font-size:13px;font-weight:500;font-family:var(--font-mono);color:var(--text);">${fmtR(g.target)}</div></div>
           <div style="background:${coBg};border:0.5px solid ${coBorder};border-radius:6px;padding:4px 10px;display:flex;flex-direction:column;justify-content:center;color:${coText};font-family:var(--font-mono);">
             <div style="display:flex;justify-content:space-between;align-items:baseline;padding:2px 0;font-size:12px;">
-              <span style="font-size:10px;text-transform:uppercase;letter-spacing:0.05em;opacity:0.75;">Saving</span>
+              <span style="font-size:10px;text-transform:uppercase;letter-spacing:0.05em;opacity:0.75;" title="Average monthly amount you're projected to contribute until this goal completes. Excludes market growth, so it is directly comparable to Need/mo.">Contrib/mo</span>
               <span style="font-size:13px;font-weight:500;">${fmtR(monthlyContrib || 0)}</span>
             </div>
             <div style="height:0.5px;background:currentColor;opacity:0.2;margin:1px 0;"></div>
             <div style="display:flex;justify-content:space-between;align-items:baseline;padding:2px 0;font-size:12px;">
-              <span style="font-size:10px;text-transform:uppercase;letter-spacing:0.05em;opacity:0.75;">Need/mo</span>
+              <span style="font-size:10px;text-transform:uppercase;letter-spacing:0.05em;opacity:0.75;" title="Average monthly contribution required to hit the target by the deadline, accounting for growth on the current balance and on future contributions.">Need/mo</span>
               <span style="font-size:13px;font-weight:500;">${neededPerMonth != null ? fmtR(neededPerMonth) : '—'}</span>
             </div>
           </div>
@@ -7175,7 +7208,7 @@ const DP_MON_IDX = { jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:1
 // Build marker. Bump on every deploy. `console.info` prints it at boot, and
 // rothAudit() echoes it — so "is the new file actually live?" is answerable in
 // two seconds instead of a full export round-trip.
-const DASHBOARD_BUILD = '2026-09-01b roth-taxyear + fc-first-col-delta';
+const DASHBOARD_BUILD = '2026-09-01c roth-taxyear + fc-first-col-delta + goal-contrib';
 
 // =====================================================================
 // CONTRIBUTION LIMITS
