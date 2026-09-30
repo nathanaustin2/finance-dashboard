@@ -3852,6 +3852,35 @@ function getGoalPoolValue(keys, src) {
   }, 0);
 }
 
+// Monthly growth rate for a goal's pool, matching exactly what buildGoalForecastSeries
+// applies to those same accounts. Two things keep this consistent with the projection:
+//   1. Same inputs — proj-return / proj-cash-return via getFcDefaults(), not a separate constant.
+//   2. Same compounding — (1 + annual)^(1/12) - 1, NOT annual/12. The simple form overstates
+//      the monthly rate (8% -> 0.6667%/mo instead of 0.6434%/mo), which used to make Need/mo
+//      disagree with the balance path the rest of the dashboard projects.
+// A goal spanning both invested and cash accounts gets a balance-weighted blend; before any
+// balance exists it falls back to weighting by how many keys of each kind it tracks.
+const GOAL_INVEST_KEYS = ['invest','nateroth','allyroth','elevate','voya','hsa'];
+const GOAL_CASH_KEYS   = ['savings','efund','carfund','checking','car1','car2','totalcash'];
+function getGoalMonthlyRate(keys, src) {
+  const def     = getFcDefaults();
+  const investG = Math.pow(1 + (def.investRatePct || 0) / 100, 1 / 12) - 1;
+  const cashG   = Math.pow(1 + (def.cashRatePct   || 0) / 100, 1 / 12) - 1;
+  let investAmt = 0, cashAmt = 0, investN = 0, cashN = 0;
+  (keys || []).forEach(k => {
+    if (GOAL_INVEST_KEYS.includes(k))    { investAmt += getGoalPoolValue([k], src || {}); investN++; }
+    else if (GOAL_CASH_KEYS.includes(k)) { cashAmt   += getGoalPoolValue([k], src || {}); cashN++;   }
+    else if (k === 'networth') {
+      investAmt += getGoalPoolValue(['invest'], src || {});                investN++;
+      cashAmt   += getGoalPoolValue(['savings','efund','checking'], src||{}); cashN++;
+    }
+  });
+  const total = investAmt + cashAmt;
+  if (total > 0)            return (investG * investAmt + cashG * cashAmt) / total;
+  if (investN + cashN > 0)  return (investG * investN   + cashG * cashN)   / (investN + cashN);
+  return cashG;
+}
+
 // Average monthly CONTRIBUTION into a goal from "now" (selVal) until projected completion.
 //
 // The projected balance path already includes modeled market/interest growth, so a naive
@@ -4064,21 +4093,31 @@ function renderGoals(cur, selVal) {
       : null;
 
     // Needed/mo calculation — always show when goal is in progress with a deadline
+    // Needed/mo — one annuity solve for EVERY goal; only the growth rate differs.
+    // Invested pools use the investment return, cash pools the cash yield, mixed pools a
+    // balance-weighted blend. Previously cash goals used plain remaining/months, which
+    // ignored the interest the projection credits them and so overstated what you must
+    // contribute. Like Contrib/mo, this is a pure contribution figure: growth on the
+    // existing balance is handled by fvCurrent, growth on future contributions by the
+    // annuity factor. That makes the two rows in the callout directly comparable.
     let neededPerMonth = null;
     if (remaining > 0 && monthsToDeadline > 0) {
-      const isInvestGoal = g.contribType === 'invest' ||
-        (g.sourceKeys || []).some(k => ['invest','nateroth','allyroth','elevate','voya','hsa'].includes(k));
-      if (isInvestGoal) {
-        try {
-          const annualReturn = getProjAssumptions().annualReturn || 0.08;
-          const r = annualReturn / 12;
-          const n = monthsToDeadline;
-          const fvFactor = Math.pow(1 + r, n);
+      const n = monthsToDeadline;
+      try {
+        const rateKeys = (g.sourceKeys && g.sourceKeys.length) ? g.sourceKeys
+                       : (g.sourceKey ? [g.sourceKey] : ['savings']);
+        const r = getGoalMonthlyRate(rateKeys, cur);
+        if (r > 0) {
+          const fvFactor  = Math.pow(1 + r, n);
           const fvCurrent = current * fvFactor;
-          neededPerMonth = g.target > fvCurrent ? Math.ceil((g.target - fvCurrent) * r / (fvFactor - 1)) : 0;
-        } catch(e) { neededPerMonth = Math.ceil(remaining / monthsToDeadline); }
-      } else {
-        neededPerMonth = Math.ceil(remaining / monthsToDeadline);
+          neededPerMonth = g.target > fvCurrent
+            ? Math.ceil((g.target - fvCurrent) * r / (fvFactor - 1))
+            : 0;
+        } else {
+          neededPerMonth = Math.ceil(remaining / n); // zero-growth pool: plain division
+        }
+      } catch (e) {
+        neededPerMonth = Math.ceil(remaining / n);
       }
     }
 
@@ -7208,7 +7247,7 @@ const DP_MON_IDX = { jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:1
 // Build marker. Bump on every deploy. `console.info` prints it at boot, and
 // rothAudit() echoes it — so "is the new file actually live?" is answerable in
 // two seconds instead of a full export round-trip.
-const DASHBOARD_BUILD = '2026-09-01c roth-taxyear + fc-first-col-delta + goal-contrib';
+const DASHBOARD_BUILD = '2026-09-01d roth-taxyear + fc-first-col-delta + goal-contrib + need-rate';
 
 // =====================================================================
 // CONTRIBUTION LIMITS
