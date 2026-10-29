@@ -7247,7 +7247,7 @@ const DP_MON_IDX = { jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:1
 // Build marker. Bump on every deploy. `console.info` prints it at boot, and
 // rothAudit() echoes it — so "is the new file actually live?" is answerable in
 // two seconds instead of a full export round-trip.
-const DASHBOARD_BUILD = '2026-09-01d roth-taxyear + fc-first-col-delta + goal-contrib + need-rate';
+const DASHBOARD_BUILD = '2026-10-29 returns-backfill-2023';
 
 // =====================================================================
 // CONTRIBUTION LIMITS
@@ -9453,12 +9453,21 @@ function saveGoalEdit() {
 // RETURNS TAB — Schwab-style Performance View
 // =====================================================================
 
+// Balances for months that predate the transaction history, used only as BEGINNING
+// balances for the first tracked month. The 2023-09 .. 2023-12 entries that used to live
+// here were removed: every value matched data.balances to the cent, and getRawBals() checks
+// this table FIRST, so a stale duplicate here would have silently overridden live data.
+//
+// null means "we don't have this figure yet" — distinct from 0, which means the account
+// genuinely held nothing. A month containing any null cannot serve as a beginning balance
+// (see retBalKnown), so the series starts one month later until the gap is filled.
 const RETURNS_SEED_BALANCES = {
-  '2023-09': { nateroth: 15426.35, allyroth: 0, elevate: 0, voya: 2090.55, hsa: 0 },
-  '2023-10': { nateroth: 15025.24, allyroth: 0, elevate: 0, voya: 2026.25, hsa: 0 },
-  '2023-11': { nateroth: 16476.39, allyroth: 0, elevate: 0, voya: 2175.70, hsa: 0 },
-  '2023-12': { nateroth: 17241.63, allyroth: 0, elevate: 0, voya: 2334.41, hsa: 0 },
+  // 12/31/2022 — Roth figure provided by Nate. Voya held $2,103.00 at 1/31/2023 but its
+  // 12/31/2022 value is not in data.balances, BSinputs, or the workbook. Fill it in to
+  // unlock January 2023 as the first tracked month; no other change is needed.
+  '2022-12': { nateroth: 14294.42, allyroth: 0, elevate: 0, voya: null, hsa: 0 },
 };
+const RET_BAL_KEYS = ['nateroth','allyroth','elevate','voya','hsa'];
 const RETURNS_SEED_CONTRIBS = {
   '2023-10': { nateroth: 10, allyroth: 0, elevate: 0, voya: 0, hsa: 0 },
   '2023-11': { nateroth: 20, allyroth: 0, elevate: 0, voya: 0, hsa: 0 },
@@ -9481,6 +9490,34 @@ let _retToMonth    = 1;
 let _retToYear     = 2026;
 let _retAcctMode   = 'total';   // 'total' | 'custom'
 let _retCustomKeys = [];         // which individual accounts are checked when mode='custom'
+
+// A month can serve as a BEGINNING balance only if we have it and no account is unknown.
+// Guards against starting the series on a partial opening balance, which would silently
+// book a missing account's whole balance as that month's investment gain.
+function retBalKnown(monthKey) {
+  const seed = RETURNS_SEED_BALANCES[monthKey];
+  if (seed) return RET_BAL_KEYS.every(k => seed[k] !== null && seed[k] !== undefined);
+  const data = loadData();
+  return !!((data.balances || {})[monthKey]);
+}
+
+// Earliest month we can compute a return for: the first month that is itself complete AND
+// whose prior month is a fully-known beginning balance. Replaces a hardcoded 2023-10 start,
+// which was the only thing holding the series back — the balances and HISTORICAL_IS
+// contribution data both run to 2023-01.
+function retFirstTrackedMonth() {
+  const data = loadData();
+  const months = [...new Set([
+    ...Object.keys(data.balances || {}),
+    ...Object.keys(RETURNS_SEED_BALANCES),
+  ])].filter(k => /^\d{4}-\d{2}$/.test(k)).sort();
+  for (const key of months) {
+    const y = parseInt(key.slice(0, 4)), mo = parseInt(key.slice(5, 7));
+    const priorKey = getMonthKey(mo === 1 ? y - 1 : y, mo === 1 ? 12 : mo - 1);
+    if (retBalKnown(priorKey) && isMonthComplete(key)) return { y, mo };
+  }
+  return { y: 2023, mo: 10 }; // historical fallback
+}
 
 function isMonthComplete(monthKey) {
   if (RETURNS_SEED_BALANCES[monthKey]) return true;
@@ -9534,7 +9571,8 @@ function getRawContribs(year, month) {
 
 function buildFullRetSeries() {
   const series = [];
-  let y = 2023, mo = 10;
+  const start = retFirstTrackedMonth();
+  let y = start.y, mo = start.mo;
   const now = new Date();
   const endY = now.getFullYear(), endMo = now.getMonth() + 1;
 
@@ -9584,9 +9622,11 @@ function retFindRange(series, rangeKey) {
   return { fromIdx: 0, toIdx: last };
 }
 
-// Known cost basis at the start of tracking (Oct 2023) — money contributed before tracking began
+// Cost basis at the start of tracking — money contributed before the series begins.
+// Unchanged by the backfill: HISTORICAL_IS records $0 of contributions in every month of
+// Jan-Sep 2023, so the basis at 12/31/2022 is the same figure as at the start of Oct 2023.
 const INCEPTION_BASIS = {
-  nateroth: 9928.76,  // Nate's Roth IRA basis as of Oct 2023 (provided by Nate)
+  nateroth: 9928.76,  // Nate's Roth IRA basis, provided by Nate; unchanged back to 12/31/2022
   allyroth: 0,
   elevate:  0,
   voya:     0,
