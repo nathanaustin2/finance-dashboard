@@ -1450,6 +1450,17 @@
     </div>
   </div>
 
+  <!-- Monthly detail table -->
+  <div class="card" style="padding:16px 18px;margin-bottom:14px;">
+    <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:10px;gap:12px;">
+      <div style="font-size:13px;font-weight:600;color:var(--text);">Monthly Detail</div>
+      <div id="ret-table-sub" style="font-size:11px;color:var(--text3);"></div>
+    </div>
+    <div style="overflow-x:auto;">
+      <table id="ret-table" style="width:100%;border-collapse:collapse;font-size:12px;"></table>
+    </div>
+  </div>
+
   <!-- Footnote -->
   <div style="font-size:11px;color:var(--text3);font-style:italic;padding:0 4px;">
     Returns use the Simple Dietz time-weighted method.
@@ -7247,7 +7258,7 @@ const DP_MON_IDX = { jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:1
 // Build marker. Bump on every deploy. `console.info` prints it at boot, and
 // rothAudit() echoes it — so "is the new file actually live?" is answerable in
 // two seconds instead of a full export round-trip.
-const DASHBOARD_BUILD = '2026-10-29 returns-backfill-2023';
+const DASHBOARD_BUILD = '2026-10-29b returns-backfill + monthly-detail-table';
 
 // =====================================================================
 // CONTRIBUTION LIMITS
@@ -9536,37 +9547,75 @@ function getRawBals(monthKey) {
   return { nateroth: b.nateroth||0, allyroth: b.allyroth||0, elevate: b.elevate||0, voya: b.voya||0, hsa: b.hsa||0 };
 }
 
-function getRawContribs(year, month) {
-  const key = getMonthKey(year, month);
-  if (RETURNS_SEED_CONTRIBS[key]) return { ...RETURNS_SEED_CONTRIBS[key] };
+// Per-account external cash flows for a month, split into GROSS contributions and
+// WITHDRAWALS. The returns table shows the two columns separately; Simple Dietz uses
+// the net (see getRawContribs below).
+//
+// Withdrawals are entered as `type: Savings, category: Withdrawal` with subcategory
+// 401k / ROTH IRA / HSA. Before this split the returns tab read a single blended
+// figure per account, and blended inconsistently: getMonthISData overwrites d.sHSA as
+// net of withdrawals, but leaves d.s401k and d.sRoth GROSS (the net versions live in
+// s401kNet / sRothNet, which nothing read). Every withdrawal to date has been HSA, so
+// the numbers happened to be right — but a 401(k) or Roth withdrawal would have been
+// counted as a contribution and inflated that month's return.
+function getRawFlows(year, month) {
+  const key   = getMonthKey(year, month);
+  const zero  = () => ({ nateroth: 0, allyroth: 0, elevate: 0, voya: 0, hsa: 0 });
+  const seed  = RETURNS_SEED_CONTRIBS[key];
+  if (seed) return { contrib: { ...zero(), ...seed }, withdrawal: zero() };
 
-  // Use HISTORICAL_IS directly for accurate per-account Roth split
+  const contrib = zero(), withdrawal = zero();
+
+  // HISTORICAL_IS path (months predating the live transaction store).
+  // It carries no 401k/Roth withdrawal fields, but does carry both sHSAContrib (gross)
+  // and sHSA (net), so the HSA withdrawal is recoverable as the difference.
   const hist = (HISTORICAL_IS[year] || {})[month];
   if (hist && hist.savings) {
     const s = hist.savings;
-    const nateRoth = s.sRothNate !== undefined ? (s.sRothNate || 0) : (s.sRoth || 0);
-    return {
-      nateroth: nateRoth,
-      allyroth:  s.sRothAlly || 0,
-      elevate:   (s.s401k || 0) + (s.m401k || 0),
-      hsa:       (s.sHSA  || 0) + (s.mHSA  || 0),
-      voya:      0,
-    };
+    contrib.nateroth = s.sRothNate !== undefined ? (s.sRothNate || 0) : (s.sRoth || 0);
+    contrib.allyroth = s.sRothAlly || 0;
+    contrib.elevate  = (s.s401k || 0) + (s.m401k || 0);
+    const hsaGross   = s.sHSAContrib !== undefined ? (s.sHSAContrib || 0) : (s.sHSA || 0);
+    contrib.hsa      = hsaGross + (s.mHSA || 0);
+    withdrawal.hsa   = Math.max(0, hsaGross - (s.sHSA || 0));
+    return { contrib, withdrawal };
   }
 
-  // Fall back to getMonthISData for 2026+ localStorage months
-  const d = getMonthISData(year, month);
-  const totalRoth = d.sRoth || 0;
+  // Live path.
+  const d    = getMonthISData(year, month);
   const data = loadData();
-  const allyBal = (data.balances && data.balances[key]) ? (data.balances[key].allyroth || 0) : 0;
-  const allyC = allyBal > 0 ? Math.min(totalRoth, 625) : 0;
-  return {
-    nateroth: Math.max(0, totalRoth - allyC),
-    allyroth:  allyC,
-    elevate:   (d.s401k || 0) + (d.m401k || 0),
-    hsa:       (d.sHSA  || 0) + (d.mHSA  || 0),
-    voya:      0,
-  };
+  const allyBal   = (data.balances && data.balances[key]) ? (data.balances[key].allyroth || 0) : 0;
+  const totalRoth = d.sRoth || 0;                     // gross
+  const allyC     = allyBal > 0 ? Math.min(totalRoth, 625) : 0;
+  contrib.nateroth = Math.max(0, totalRoth - allyC);
+  contrib.allyroth = allyC;
+  contrib.elevate  = (d.s401k || 0) + (d.m401k || 0); // gross
+  contrib.hsa      = (d.sHSAContrib || 0) + (d.mHSA || 0);
+
+  withdrawal.elevate = d.s401kWithdraw || 0;
+  withdrawal.hsa     = d.sHSAWithdraw  || 0;
+  // Roth withdrawals aren't recorded per person, so split them the same way the
+  // contributions split; with no contributions that month, charge them to Nate's.
+  const rothW = d.sRothWithdraw || 0;
+  if (rothW > 0) {
+    if (totalRoth > 0) {
+      withdrawal.nateroth = rothW * (contrib.nateroth / totalRoth);
+      withdrawal.allyroth = rothW * (contrib.allyroth / totalRoth);
+    } else {
+      withdrawal.nateroth = rothW;
+    }
+  }
+  return { contrib, withdrawal };
+}
+
+// Net external flow per account — what Simple Dietz needs. Unchanged signature and,
+// for every month on record, unchanged values: all three withdrawals so far are HSA,
+// which was already being netted.
+function getRawContribs(year, month) {
+  const f = getRawFlows(year, month);
+  const net = {};
+  RET_BAL_KEYS.forEach(k => { net[k] = (f.contrib[k] || 0) - (f.withdrawal[k] || 0); });
+  return net;
 }
 
 function buildFullRetSeries() {
@@ -9584,8 +9633,9 @@ function buildFullRetSeries() {
     const priorKey = getMonthKey(mo === 1 ? y-1 : y, mo === 1 ? 12 : mo-1);
     const beginBal = getRawBals(priorKey);
     const contrib  = getRawContribs(y, mo);
+    const flows    = getRawFlows(y, mo);
 
-    series.push({ monthKey: key, year: y, month: mo, endBal, beginBal, contrib });
+    series.push({ monthKey: key, year: y, month: mo, endBal, beginBal, contrib, flows });
     mo++; if (mo > 12) { mo = 1; y++; }
   }
   return series;
@@ -9656,6 +9706,8 @@ function retBuildDisp(fullSeries, fromIdx, toIdx, acctKeys) {
     const endB = acctKeys.reduce((s, k) => s + (pt.endBal[k]   || 0), 0);
     const begB = acctKeys.reduce((s, k) => s + (pt.beginBal[k] || 0), 0);
     const con  = acctKeys.reduce((s, k) => s + (pt.contrib[k]  || 0), 0);
+    const gross = acctKeys.reduce((s, k) => s + ((pt.flows && pt.flows.contrib[k])    || 0), 0);
+    const wdraw = acctKeys.reduce((s, k) => s + ((pt.flows && pt.flows.withdrawal[k]) || 0), 0);
     cumContrib += con;
     // Simple Dietz: use begB + con/2 as denominator.
     // Guard: if a large withdrawal makes the denominator unreliably small,
@@ -9672,6 +9724,8 @@ function retBuildDisp(fullSeries, fromIdx, toIdx, acctKeys) {
       investLine: cumBasis[fromIdx + i] + con,
       moRet,
       cumRet:    cumFactor - 1,
+      grossContrib: gross,   // table column: Contribution
+      withdrawal:   wdraw,   // table column: Withdrawal
     };
   });
 
@@ -9687,7 +9741,8 @@ function retBuildDisp(fullSeries, fromIdx, toIdx, acctKeys) {
   if (firstActive > 0) {
     const anchorPt = points[firstActive - 1];
     trimmedPoints = [
-      { ...anchorPt, endBal: 0, cumContrib: 0, investLine: 0, moRet: 0, cumRet: 0 },
+      { ...anchorPt, endBal: 0, cumContrib: 0, investLine: 0, moRet: 0, cumRet: 0,
+        grossContrib: 0, withdrawal: 0, isAnchor: true },
       ...points.slice(firstActive),
     ];
     trimmedStartBal = 0;
@@ -10011,6 +10066,62 @@ function retAcctChange(type, key, checked) {
   retUpdateCharts();
 }
 
+// Monthly detail table. Driven by the SAME `points` array the charts use, so the range
+// selector, account selector and zero-anchor trimming all apply identically and the
+// table can never disagree with the chart above it. Oldest first, matching the charts'
+// left-to-right time axis.
+function retDrawTable(points, acctLabel, fromLbl, toLbl) {
+  const el = document.getElementById('ret-table');
+  if (!el) return;
+  const sub = document.getElementById('ret-table-sub');
+  if (sub) sub.textContent = `${acctLabel} · ${fromLbl} to ${toLbl}`;
+
+  const th = (txt, align) =>
+    `<th style="text-align:${align};padding:7px 8px;font-weight:600;color:var(--text3);font-size:11px;` +
+    `text-transform:uppercase;letter-spacing:0.05em;white-space:nowrap;">${txt}</th>`;
+  const num = (v, extra) =>
+    `<td style="text-align:right;padding:7px 8px;font-family:var(--font-mono);white-space:nowrap;${extra||''}">${v}</td>`;
+  const dash = '<span style="color:var(--text3);">&mdash;</span>';
+  // Withdrawals render in parentheses — accounting convention, and it keeps the column
+  // from reading as another contribution.
+  const paren = (v) => v > 0.005 ? `(${fmt(v)})` : dash;
+  const pct   = (v) => `<span style="color:${v >= 0 ? 'var(--positive)' : 'var(--negative)'};">${retFmt(v)}</span>`;
+
+  let totContrib = 0, totWithdraw = 0;
+  const rows = points.map(p => {
+    // The synthetic zero anchor is a chart reference point, not a real month.
+    if (p.isAnchor) {
+      return `<tr style="border-bottom:1px solid var(--border);">` +
+        `<td style="padding:7px 8px;color:var(--text3);">${p.fullLabel}</td>` +
+        num(dash) + num(dash) + num(fmt(0)) + num(dash) + num(dash) + `</tr>`;
+    }
+    totContrib  += p.grossContrib || 0;
+    totWithdraw += p.withdrawal   || 0;
+    return `<tr style="border-bottom:1px solid var(--border);">` +
+      `<td style="padding:7px 8px;color:var(--text);white-space:nowrap;">${p.fullLabel}</td>` +
+      num((p.grossContrib || 0) > 0.005 ? fmt(p.grossContrib) : dash) +
+      num(paren(p.withdrawal || 0)) +
+      num(fmt(p.endBal)) +
+      num(pct(p.moRet)) +
+      num(pct(p.cumRet)) + `</tr>`;
+  }).join('');
+
+  const last = points[points.length - 1];
+  el.innerHTML =
+    `<thead><tr style="border-bottom:2px solid var(--border);">` +
+      th('Month','left') + th('Contribution','right') + th('Withdrawal','right') +
+      th('Balance','right') + th('Month Return','right') + th('Cumulative Return','right') +
+    `</tr></thead><tbody>${rows}` +
+    `<tr style="border-top:2px solid var(--border);font-weight:600;">` +
+      `<td style="padding:9px 8px;color:var(--text);">Total</td>` +
+      num(fmt(totContrib),  'font-weight:600;') +
+      num(paren(totWithdraw), 'font-weight:600;') +
+      num(fmt(last ? last.endBal : 0), 'font-weight:600;') +
+      num(dash) +
+      num(last ? pct(last.cumRet) : dash, 'font-weight:600;') +
+    `</tr></tbody>`;
+}
+
 function retUpdateCharts() {
   const fullSeries = buildFullRetSeries();
   if (!fullSeries.length) return;
@@ -10043,6 +10154,7 @@ function retUpdateCharts() {
 
   retDrawValChart('ret-value-chart', startBal, startContrib, points);
   retDrawRetChart('ret-rate-chart', points);
+  retDrawTable(points, acctLabel, fromLbl, toLbl);
 
   // Sync From dropdowns to the effective account start (trimmed) when using a preset range
   if (_retRange !== 'custom') {
