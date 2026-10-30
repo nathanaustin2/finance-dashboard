@@ -7258,7 +7258,7 @@ const DP_MON_IDX = { jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:1
 // Build marker. Bump on every deploy. `console.info` prints it at boot, and
 // rothAudit() echoes it — so "is the new file actually live?" is answerable in
 // two seconds instead of a full export round-trip.
-const DASHBOARD_BUILD = '2026-10-29b returns-backfill + monthly-detail-table';
+const DASHBOARD_BUILD = '2026-10-29c returns from Jan 2023 + monthly-detail-table';
 
 // =====================================================================
 // CONTRIBUTION LIMITS
@@ -9471,12 +9471,14 @@ function saveGoalEdit() {
 //
 // null means "we don't have this figure yet" — distinct from 0, which means the account
 // genuinely held nothing. A month containing any null cannot serve as a beginning balance
-// (see retBalKnown), so the series starts one month later until the gap is filled.
+// (see retBalKnown), so the series starts one month later until the gap is filled. No
+// nulls remain, but the guard stays: it is what stops a partial opening balance from
+// booking a missing account's whole value as that month's investment gain.
 const RETURNS_SEED_BALANCES = {
-  // 12/31/2022 — Roth figure provided by Nate. Voya held $2,103.00 at 1/31/2023 but its
-  // 12/31/2022 value is not in data.balances, BSinputs, or the workbook. Fill it in to
-  // unlock January 2023 as the first tracked month; no other change is needed.
-  '2022-12': { nateroth: 14294.42, allyroth: 0, elevate: 0, voya: null, hsa: 0 },
+  // 12/31/2022 — opening balances, both provided by Nate from account statements.
+  // These predate data.balances (which starts 2023-01) and exist only to serve as the
+  // beginning balance for January 2023, the first tracked month.
+  '2022-12': { nateroth: 14294.42, allyroth: 0, elevate: 0, voya: 1965.20, hsa: 0 },
 };
 const RET_BAL_KEYS = ['nateroth','allyroth','elevate','voya','hsa'];
 const RETURNS_SEED_CONTRIBS = {
