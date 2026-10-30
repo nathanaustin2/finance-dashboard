@@ -7258,7 +7258,7 @@ const DP_MON_IDX = { jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:1
 // Build marker. Bump on every deploy. `console.info` prints it at boot, and
 // rothAudit() echoes it — so "is the new file actually live?" is answerable in
 // two seconds instead of a full export round-trip.
-const DASHBOARD_BUILD = '2026-10-29c returns from Jan 2023 + monthly-detail-table';
+const DASHBOARD_BUILD = '2026-10-29d returns Jan 2023 + detail table + roth-person-split';
 
 // =====================================================================
 // CONTRIBUTION LIMITS
@@ -9584,29 +9584,32 @@ function getRawFlows(year, month) {
   }
 
   // Live path.
-  const d    = getMonthISData(year, month);
-  const data = loadData();
-  const allyBal   = (data.balances && data.balances[key]) ? (data.balances[key].allyroth || 0) : 0;
-  const totalRoth = d.sRoth || 0;                     // gross
-  const allyC     = allyBal > 0 ? Math.min(totalRoth, 625) : 0;
-  contrib.nateroth = Math.max(0, totalRoth - allyC);
-  contrib.allyroth = allyC;
+  const d = getMonthISData(year, month);
   contrib.elevate  = (d.s401k || 0) + (d.m401k || 0); // gross
   contrib.hsa      = (d.sHSAContrib || 0) + (d.mHSA || 0);
-
   withdrawal.elevate = d.s401kWithdraw || 0;
   withdrawal.hsa     = d.sHSAWithdraw  || 0;
-  // Roth withdrawals aren't recorded per person, so split them the same way the
-  // contributions split; with no contributions that month, charge them to Nate's.
-  const rothW = d.sRothWithdraw || 0;
-  if (rothW > 0) {
-    if (totalRoth > 0) {
-      withdrawal.nateroth = rothW * (contrib.nateroth / totalRoth);
-      withdrawal.allyroth = rothW * (contrib.allyroth / totalRoth);
-    } else {
-      withdrawal.nateroth = rothW;
-    }
-  }
+
+  // Roth splits per person off the transaction notes, the same rule rothPersonOf uses
+  // everywhere else in the app (blank notes mean Nate's).
+  //
+  // This replaced a heuristic that assigned Ally `Math.min(totalRoth, 625)` and gave Nate
+  // the remainder. That silently assumed Ally contributes exactly $625 every month, so any
+  // lump sum landed almost entirely on Nate: September 2026's $8,750 split 8,125 / 625
+  // instead of 4,375 / 4,375, and April 2026's $4,867.50 went 4,242.50 / 625 when Ally had
+  // actually put in 4,712.50 of it. Her balance jumped without a matching contribution, so
+  // the returns tab booked the difference as investment gain — a fake +38.20% for September
+  // and +189.73% for April. Cross-checked against the explicit sRothNate / sRothAlly fields
+  // in HISTORICAL_IS: 21 months, zero mismatches.
+  const rothRows = (loadData().transactions || {})[key] || [];
+  rothRows.forEach(r => {
+    if (r.type !== 'Savings' || r.subcategory !== 'ROTH IRA') return;
+    const amt = parseFloat(r.amount) || 0;
+    const who = rothPersonOf(r) === 'Ally' ? 'allyroth' : 'nateroth';
+    if (r.category === 'Personal Contribution') contrib[who]    += amt;
+    else if (r.category === 'Withdrawal')       withdrawal[who] += amt;
+  });
+
   return { contrib, withdrawal };
 }
 
